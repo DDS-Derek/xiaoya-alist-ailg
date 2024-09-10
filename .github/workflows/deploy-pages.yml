@@ -22,6 +22,7 @@ jobs:
         run: |
           if [ ! -d public ]; then mkdir public; fi
           find . -mindepth 1 -maxdepth 1 ! -name public -exec cp -r {} public/ \;
+          echo "gbox.ggbond.org" > public/CNAME
           ls -R public
 
       - name: Deploy to GitHub Pages
