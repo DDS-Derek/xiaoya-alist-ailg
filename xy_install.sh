@@ -485,6 +485,20 @@ update_ailg() {
 }
 
 function user_select1() {
+    docker_name="$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)"
+    if [ -n "${docker_name}" ]; then
+        WARN "您已安装g-box，包含老G版alist的所有功能，无需重复安装！继续安装将自动卸载已安装的g-box容器！"
+        read -erp "是否继续安装？（确认按Y/y，否则按任意键返回！）：" ow_install
+        if [[ $ow_install == [Yy] ]]; then
+            config_dir=$(docker inspect --format '{{ (index .Mounts 0).Source }}' "${docker_name}")
+            INFO "正在停止和删除${docker_name}容器……"
+            docker rm -f $docker_name
+            INFO "$docker_name 容器已删除"
+        else
+            main
+            return
+        fi
+    fi
     echo -e "———————————————————————————————————— \033[1;33mA  I  老  G\033[0m —————————————————————————————————"
     echo -e "\n"
     echo -e "\033[1;32m1、host版 - 无🍉十全大补瓜🍉第三方播放器$NC"
@@ -2345,6 +2359,11 @@ emby_list=()
 emby_order=()
 img_order=()
 if [ "$1" == "g-box" ] || [ "$1" == "xiaoya_jf" ]; then
+    config_dir=$(docker inspect --format '{{ (index .Mounts 0).Source }}' "${1}")
+    [ $? -eq 1 ] && ERROR "您未安装${1}容器" && exit 1
+    if [ ! -f "{config_dir}/docker_mirrors.txt" ]; then
+        skip_choose_mirror="y"
+    fi
     sync_ailg "$1"
 elif [ "$1" == "update_data" ]; then
     INFO "正在为你更新小雅的data文件……"
