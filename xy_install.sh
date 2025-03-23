@@ -470,7 +470,7 @@ update_ailg() {
         local_sha=$(docker inspect -f'{{index .RepoDigests 0}}' "${update_img}" | cut -f2 -d:)
     fi
     for i in {1..3}; do
-        remote_sha=$(curl -sSLf https://gbox.ggbond.org/ailg_sha_remote.txt | grep -E "${update_img}" | awk '{print $2}')
+        remote_sha=$(curl -sSLf https://ailg.ggbond.org/ailg_sha_remote.txt | grep -E "${update_img}" | awk '{print $2}')
         [ -n "${remote_sha}" ] && break
     done
     #remote_sha=$(curl -s -m 20 "https://hub.docker.com/v2/repositories/ailg/${name_img}/tags/${tag_img}" | grep -oE '[0-9a-f]{64}' | tail -1)
@@ -592,12 +592,12 @@ function user_select1() {
             update_ailg "${_update_img}"
         fi
     fi
-    curl -o /tmp/update_new_jf.sh https://gbox.ggbond.org/update_new_jf.sh
+    curl -o /tmp/update_new_jf.sh https://ailg.ggbond.org/update_new_jf.sh
     for i in {1..5}; do
         grep -q "长度不对" /tmp/update_new_jf.sh && break
         echo -e "文件获取失败，正在进行第${i}次重试……"
         rm -f /tmp/update_new_jf.sh >/dev/null 2>&1
-        curl -o /tmp/update_new_jf.sh https://gbox.ggbond.org/update_new_jf.sh
+        curl -o /tmp/update_new_jf.sh https://ailg.ggbond.org/update_new_jf.sh
     done
     grep -q "长度不对" /tmp/update_new_jf.sh || {
         echo -e "文件获取失败，检查网络后重新运行脚本！"
@@ -643,7 +643,7 @@ function user_select2() {
     fi
     mkdir -p $media_dir/xiaoya
     mkdir -p $media_dir/temp
-    curl -o /tmp/update_meta_jf.sh https://gbox.ggbond.org/update_meta_jf.sh
+    curl -o /tmp/update_meta_jf.sh https://ailg.ggbond.org/update_meta_jf.sh
     meta_select
     chmod 777 /tmp/update_meta_jf.sh
     docker run -i --security-opt seccomp=unconfined --rm --net=host -v /tmp:/tmp -v $media_dir:/media -v $config_dir:/etc/xiaoya -e LANG=C.UTF-8 ailg/ggbond:latest /tmp/update_meta_jf.sh
@@ -752,7 +752,7 @@ check_loop_support() {
             fi
         else
             for i in {1..3}; do
-                curl -o /tmp/loop_test.img https://gbox.ggbond.org/loop_test.img
+                curl -o /tmp/loop_test.img https://ailg.ggbond.org/loop_test.img
                 if [ -f /tmp/loop_test.img ] && [ $(stat -c%s /tmp/loop_test.img) -gt 1024000 ]; then
                     break
                 else
@@ -1269,7 +1269,7 @@ function user_select4() {
             docker images --format '{{.Repository}}:{{.Tag}}' | grep -q ddsderek/xiaoya-emd:latest || (ERROR "ddsderek/xiaoya-emd:latest镜像拉取失败，请检查网络后手动安装！" && exit 1)
 
             if ! docker cp "${docker_name}":/var/lib/"${entrypoint_mount}" "$image_dir/entrypoint.sh"; then
-                if ! curl -o "$image_dir/entrypoint.sh" https://gbox.ggbond.org/${entrypoint_mount}; then
+                if ! curl -o "$image_dir/entrypoint.sh" https://ailg.ggbond.org/${entrypoint_mount}; then
                     ERROR "获取文件失败，请将老G的alist更新到最新版或检查网络后重试。更新方法：重新运行一键脚本，选1重装alist，使用原来的目录！" && exit 1
                 fi
             fi
@@ -1296,7 +1296,7 @@ function user_select4() {
                 docker start ${emd_name}
             else
                 if ! docker cp "${docker_name}":/var/lib/"${entrypoint_mount}" "$image_dir/entrypoint.sh"; then
-                    if ! curl -o "$image_dir/entrypoint.sh" https://gbox.ggbond.org/${entrypoint_mount}; then
+                    if ! curl -o "$image_dir/entrypoint.sh" https://ailg.ggbond.org/${entrypoint_mount}; then
                         ERROR "获取文件失败，请将老G的alist更新到最新版或检查网络后重试。更新方法：重新运行一键脚本，选1重装alist，使用原来的目录！" && exit 1
                     fi
                 fi
@@ -1981,7 +1981,7 @@ sync_config() {
         echo -e "\033[1;31m同步进行中，需要较长时间，请耐心等待，直到出命令行提示符才算结束！\033[0m"
         [ -f "/tmp/sync_emby_config_ailg.sh" ] && rm -f /tmp/sync_emby_config_ailg.sh
         for i in {1..3}; do
-            curl -sSfL -o /tmp/sync_emby_config_ailg.sh https://gbox.ggbond.org/sync_emby_config_img_ailg.sh
+            curl -sSfL -o /tmp/sync_emby_config_ailg.sh https://ailg.ggbond.org/sync_emby_config_img_ailg.sh
             grep -q "返回错误" /tmp/sync_emby_config_ailg.sh && break
         done
         grep -q "返回错误" /tmp/sync_emby_config_ailg.sh || {
@@ -2390,7 +2390,7 @@ function sync_plan() {
         3)
             docker_name="$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)"
             if [ -n "${docker_name}" ]; then
-                /bin/bash -c "$(curl -sSLf https://gbox.ggbond.org/xy_install.sh)" -s "${docker_name}"
+                /bin/bash -c "$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)" -s "${docker_name}"
             else
                 ERROR "未找到G-Box容器，请先安装G-Box！"
             fi
@@ -2426,7 +2426,7 @@ function sync_plan() {
     [ -z "${config_dir}" ] && ERROR "未找到${docker_name}的挂载目录，请检查！" && exit 1
     if command -v crontab >/dev/null 2>&1; then
         crontab -l | grep -v xy_install > /tmp/cronjob.tmp
-        echo "$minu $hour */${sync_day} * * /bin/bash -c \"\$(curl -sSLf https://gbox.ggbond.org/xy_install.sh)\" -s "${docker_name}" | tee ${config_dir}/cron.log" >> /tmp/cronjob.tmp
+        echo "$minu $hour */${sync_day} * * /bin/bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)\" -s "${docker_name}" | tee ${config_dir}/cron.log" >> /tmp/cronjob.tmp
         crontab /tmp/cronjob.tmp
         chmod 777 ${config_dir}/cron.log
         echo -e "\n"
@@ -2444,7 +2444,7 @@ function sync_plan() {
         echo -e "\033[1;35m已创建/etc/crontab.bak备份文件！\033[0m"
         
         sed -i '/xy_install/d' /etc/crontab
-        echo "$minu $hour */${sync_day} * * root /bin/bash -c \"\$(curl -sSLf https://gbox.ggbond.org/xy_install.sh)\" -s "${docker_name}" | tee ${config_dir}/cron.log" >> /etc/crontab
+        echo "$minu $hour */${sync_day} * * root /bin/bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)\" -s "${docker_name}" | tee ${config_dir}/cron.log" >> /etc/crontab
         chmod 777 ${config_dir}/cron.log
         echo -e "\n"
         echo -e "———————————————————————————————————— \033[1;33mA  I  老  G\033[0m —————————————————————————————————"
@@ -2638,7 +2638,7 @@ function user_gbox() {
     INFO "G-Box初始登陆${Green}用户名：admin\t密码：admin ${NC}"
     INFO "内置sun-panel导航初始登陆${Green}用户名：ailg666\t\t密码：12345678 ${NC}"
     if ! grep -q 'alias gbox' /etc/profile; then
-        echo -e "alias gbox='bash -c \"\$(curl -sSLf https://gbox.ggbond.org/xy_install.sh)\"'" >> /etc/profile
+        echo -e "alias gbox='bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)\"'" >> /etc/profile
     fi
     source /etc/profile
 }
@@ -2655,7 +2655,7 @@ function main() {
     echo -e "1、本脚本为G-Box/小雅Jellyfin/Emby全家桶的安装脚本，使用于群晖系统环境，不保证其他系统通用；"
     echo -e "2、本脚本为个人自用，不维护，不更新，不保证适用每个人的环境，请勿用于商业用途；"
     echo -e "3、作者不对使用本脚本造成的任何后果负责，有任何顾虑，请勿运行，按CTRL+C立即退出；"
-    echo -e "4、如果您喜欢这个脚本，可以请我喝咖啡：https://gbox.ggbond.org/3q.jpg\033[0m"
+    echo -e "4、如果您喜欢这个脚本，可以请我喝咖啡：https://ailg.ggbond.org/3q.jpg\033[0m"
     echo -e "————————————————————————————————————\033[1;33m安  装  状  态\033[0m————————————————————————————————"
     echo -e "\e[0m"
     echo -e "G-Box：${st_gbox}      小雅ALIST老G版：${st_alist}     小雅姐夫（jellyfin）：${st_jf}      小雅emby：${st_emby}"
