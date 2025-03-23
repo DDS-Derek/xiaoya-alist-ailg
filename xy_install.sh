@@ -104,22 +104,27 @@ function check_space() {
 }
 
 function get_emby_image() {
+    # 设置默认版本号
+    local version=${1:-"4.8.9.0"}
+    
     cpu_arch=$(uname -m)
     case $cpu_arch in
     "x86_64" | *"amd64"*)
-        emby_image="emby/embyserver:4.8.0.56"
+        emby_image="emby/embyserver:${version}"
         ;;
     "aarch64" | *"arm64"* | *"armv8"* | *"arm/v8"*)
-        emby_image="emby/embyserver_arm64v8:4.8.0.56"
+        emby_image="emby/embyserver_arm64v8:${version}"
         ;;
     "armv7l")
-        emby_image="emby/embyserver_arm32v7:4.8.0.56"
+        emby_image="emby/embyserver_arm32v7:${version}"
         ;;
     *)
         ERROR "不支持你的CPU架构：$cpu_arch"
         exit 1
         ;;
     esac
+
+    # 检查镜像是否存在
     if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q ${emby_image}; then
         for i in {1..3}; do
             if docker_pull $emby_image; then
@@ -128,6 +133,8 @@ function get_emby_image() {
             fi
         done
     fi
+
+    # 验证镜像是否成功拉取
     docker images --format '{{.Repository}}:{{.Tag}}' | grep -q ${emby_image} || (ERROR "${emby_image}镜像拉取失败，请手动安装emby，无需重新运行本脚本，小雅媒体库在${media_dir}！" && exit 1)
 }
 
@@ -137,9 +144,9 @@ function get_jellyfin_image() {
     "x86_64" | *"amd64"*)
         linux_version=$(uname -r | cut -d"." -f1)
         if [ "${linux_version}" -lt 5 ];then
-            [[ "${f4_select}" == [56] ]] && emby_image="jellyfin/jellyfin:10.9.6" || emby_image="nyanmisaka/jellyfin:240220-amd64-legacy"
+            [[ "${f4_select}" == [78] ]] && emby_image="jellyfin/jellyfin:10.9.6" || emby_image="nyanmisaka/jellyfin:250127-amd64"
         else
-            [[ "${f4_select}" == [56] ]] && emby_image="jellyfin/jellyfin:10.9.6" || emby_image="nyanmisaka/jellyfin:latest"
+            [[ "${f4_select}" == [78] ]] && emby_image="jellyfin/jellyfin:10.9.6" || emby_image="nyanmisaka/jellyfin:latest"
         fi
         ;;
     *)
@@ -157,13 +164,14 @@ function get_jellyfin_image() {
 }
 
 function get_emby_happy_image() {
+    local version=$1
     cpu_arch=$(uname -m)
     case $cpu_arch in
     "x86_64" | *"amd64"*)
-        emby_image="amilys/embyserver:4.8.0.56"
+        emby_image="amilys/embyserver:${version}"
         ;;
     "aarch64" | *"arm64"* | *"armv8"* | *"arm/v8"*)
-        emby_image="amilys/embyserver_arm64v8:4.8.6.0"
+        emby_image="amilys/embyserver_arm64v8:${version}"
         ;;
     *)
         ERROR "不支持你的CPU架构：$cpu_arch"
@@ -176,7 +184,7 @@ function get_emby_happy_image() {
             break
         fi
     done
-    docker images --format '{{.Repository}}:{{.Tag}}' | grep -q ${emby_image} || (ERROR "${emby_image}镜像拉取失败，请手动安装emby，无需重新运行本脚本，小雅媒体库在${img_mount}！" && exit 1)
+    docker images --format '{{.Repository}}:{{.Tag}}' | grep -q ${emby_image} || (ERROR "${emby_image}镜像拉取失败，请手动安装emby，无需重新运行本脚本！" && exit 1)
 }
 
 function get_config_path() {
@@ -828,25 +836,73 @@ check_loop_support() {
 
 function user_select4() {
     down_img() {
+
+        # 先判断是否需要下载，即文件不存在或者存在 aria2 临时文件
         if [[ ! -f $image_dir/$emby_ailg ]] || [[ -f $image_dir/$emby_ailg.aria2 ]]; then
-            update_ailg ailg/ggbond:latest
+            # 更新 ailg/ggbond:latest 镜像
+            # update_ailg ailg/ggbond:latest
+            # 执行清理操作
             docker exec $docker_name ali_clear -1 > /dev/null 2>&1
-            docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
-                aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg"
+
+            if [[ $ok_115 =~ ^[Yy]$ ]]; then
+                # 尝试下载测试文件
+                docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
+                    aria2c -o /image/test.mp4 --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/115/gbox_intro.mp4" > /dev/null 2>&1
+
+                # 判断测试文件是否下载成功
+                test_file_size=$(du -b $image_dir/test.mp4 2>/dev/null | cut -f1)
+                if [[ ! -f $image_dir/test.mp4.aria2 ]] && [[ $test_file_size -eq 17675105 ]]; then
+                    # 测试文件下载成功，删除测试文件
+                    rm -f $image_dir/test.mp4
+                    use_115_path=true
+                else
+                    use_115_path=false
+                fi
+            else
+                use_115_path=false
+            fi
+
+            if $use_115_path; then
+                # 使用 115 路径下载目标文件
+                docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
+                    aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/115/${down_path}/$emby_ailg"
+            else
+                # 使用原路径下载目标文件
+                docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
+                    aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg"
+            fi
         fi
+
+        # 获取本地文件大小
         local_size=$(du -b $image_dir/$emby_ailg | cut -f1)
+
+        # 最多尝试 3 次下载
         for i in {1..3}; do
             if [[ -f $image_dir/$emby_ailg.aria2 ]] || [[ $remote_size -gt "$local_size" ]]; then
                 docker exec $docker_name ali_clear -1 > /dev/null 2>&1
-                docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
-                    aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg"
+                if $use_115_path; then
+                    # 使用 115 路径下载目标文件
+                    docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
+                        aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/115/${down_path}/$emby_ailg"
+                else
+                    # 使用原路径下载目标文件
+                    docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
+                        aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg"
+                fi
                 local_size=$(du -b $image_dir/$emby_ailg | cut -f1)
             else
                 break
             fi
         done
-        [[ -f $image_dir/$emby_ailg.aria2 ]] || [[ $remote_size != "$local_size" ]] && ERROR "文件下载失败，请检查网络后重新运行脚本！" && WARN "未下完的文件存放在${image_dir}目录，以便您续传下载，如不再需要请手动清除！" && exit 1
+
+        # 检查文件是否下载完整，若不完整则输出错误信息并退出
+        if [[ -f $image_dir/$emby_ailg.aria2 ]] || [[ $remote_size != "$local_size" ]]; then
+            ERROR "文件下载失败，请检查网络后重新运行脚本！"
+            WARN "未下完的文件存放在${image_dir}目录，以便您续传下载，如不再需要请手动清除！"
+            exit 1
+        fi
     }
+
     check_qnap
     check_loop_support
     while :; do
@@ -859,68 +915,76 @@ function user_select4() {
         echo -e "\n"
         echo -e "C、${Yellow}老G速装版会随emby/jellyfin启动自动挂载镜像，感谢DDSRem大佬提供的解决思路！${NC}"
         echo -e "\n"
-        echo -e "D、${Yellow}老G速装版新增jellyfin最新版10.9.6，建议16G以上内存安装！${NC}"
+        echo -e "D、${Red}💡💡💡非固态硬盘且低于16G内存💡💡💡不建议安装jellyfin或4.9版本的Emby!!!${NC}"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
         echo -e "\n"
-        echo -e "\033[1;32m1、小雅EMBY老G速装 - 115完整版\033[0m"
+        echo -e "\033[1;32m1、小雅EMBY老G速装 - 115完整版 - 4.8.9.0\033[0m"
         echo -e "\n"
-        echo -e "\033[1;35m2、小雅EMBY老G速装 - 115-Lite版\033[0m"
+        echo -e "\033[1;35m2、小雅EMBY老G速装 - 115-Lite版 - 4.8.9.0\033[0m"
         echo -e "\n"
-        echo -e "\033[1;32m3、小雅JELLYFIN老G速装 - 10.8.13 - 完整版\033[0m"
+        echo -e "\033[1;32m3、小雅EMBY老G速装 - 115完整版 - 4.9.0.31\033[0m"
         echo -e "\n"
-        echo -e "\033[1;35m4、小雅JELLYFIN老G速装 - 10.8.13 - Lite版\033[0m"
+        echo -e "\033[1;35m4、小雅EMBY老G速装 - 115-Lite版 - 4.9.0.31\033[0m"
         echo -e "\n"
-        echo -e "\033[1;32m5、小雅JELLYFIN老G速装 - 10.9.6 - 完整版\033[0m"
+        echo -e "\033[1;32m5、小雅JELLYFIN老G速装 - 10.8.13 - 完整版\033[0m"
         echo -e "\n"
-        echo -e "\033[1;35m6、小雅JELLYFIN老G速装 - 10.9.6 - Lite版\033[0m"
+        echo -e "\033[1;35m6、小雅JELLYFIN老G速装 - 10.8.13 - Lite版\033[0m"
         echo -e "\n"
-        echo -e "\033[1;35m7、小雅EMBY老G速装 - Lite版\033[0m"
+        echo -e "\033[1;32m7、小雅JELLYFIN老G速装 - 10.9.6 - 完整版\033[0m"
+        echo -e "\n"
+        echo -e "\033[1;35m8、小雅JELLYFIN老G速装 - 10.9.6 - Lite版\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
 
-        read -erp "请输入您的选择（1-7，按b返回上级菜单或按q退出）：" f4_select
+        read -erp "请输入您的选择（1-6，按b返回上级菜单或按q退出）：" f4_select
         case "$f4_select" in
         1)
             emby_ailg="emby-ailg-115.mp4"
             emby_img="emby-ailg-115.img"
-            space_need=160
+            space_need=120
             break
             ;;
         2)
             emby_ailg="emby-ailg-lite-115.mp4"
             emby_img="emby-ailg-lite-115.img"
-            space_need=140
+            space_need=110
             break
             ;;
         3)
-            emby_ailg="jellyfin-ailg.mp4"
-            emby_img="jellyfin-ailg.img"
-            space_need=160
+            emby_ailg="emby-ailg-115-4.9.mp4"
+            emby_img="emby-ailg-115-4.9.img"
+            space_need=125
             break
             ;;
         4)
-            emby_ailg="jellyfin-ailg-lite.mp4"
-            emby_img="jellyfin-ailg-lite.img"
-            space_need=130
+            emby_ailg="emby-ailg-lite-115-4.9.mp4"
+            emby_img="emby-ailg-lite-115-4.9.img"
+            space_need=115
             break
             ;;
         5)
-            emby_ailg="jellyfin-10.9.6-ailg.mp4"
-            emby_img="jellyfin-10.9.6-ailg.img"
-            space_need=160
-            break
-            ;;
-        6)
-            emby_ailg="jellyfin-10.9.6-ailg-lite.mp4"
-            emby_img="jellyfin-10.9.6-ailg-lite.img"
+            emby_ailg="jellyfin-ailg.mp4"
+            emby_img="jellyfin-ailg.img"
             space_need=130
             break
             ;;
+        6)
+            emby_ailg="jellyfin-ailg-lite.mp4"
+            emby_img="jellyfin-ailg-lite.img"
+            space_need=110
+            break
+            ;;
         7)
-            emby_ailg="emby-ailg-lite.mp4"
-            emby_img="emby-ailg-lite.img"
-            space_need=125
+            emby_ailg="jellyfin-10.9.6-ailg.mp4"
+            emby_img="jellyfin-10.9.6-ailg.img"
+            space_need=120
+            break
+            ;;
+        8)
+            emby_ailg="jellyfin-10.9.6-ailg-lite.mp4"
+            emby_img="jellyfin-10.9.6-ailg-lite.img"
+            space_need=110
             break
             ;;
         [Bb])
@@ -955,7 +1019,8 @@ function user_select4() {
     echo -e "\033[1;35m请输入镜像下载后需要扩容的空间（单位：GB，默认60G可直接回车，请确保大于${space_need}G剩余空间！）:\033[0m"
     read -r expand_size
     expand_size=${expand_size:-60}
-    check_path $image_dir
+    # 先询问用户 115 网盘空间是否足够
+    read -p "使用115下载镜像请确保cookie正常且网盘剩余空间不低于100G，（按Y/y 确认，按任意键走阿里云盘下载！）: " ok_115
     check_path $image_dir
     if [ -f "${image_dir}/${emby_ailg}" ] || [ -f "${image_dir}/${emby_img}" ]; then
         echo "镜像文件已存在，跳过空间检查"
@@ -963,16 +1028,16 @@ function user_select4() {
         check_space $image_dir $space_need
     fi
 
-    if [[ "${f4_select}" == [127] ]]; then
+    if [[ "${f4_select}" == [1234] ]]; then
         search_img="emby/embyserver|amilys/embyserver"
         del_name="emby"
         loop_order="/dev/loop7"
         down_path="emby"
-        get_emby_image
+        [[ "${f4_select}" == [34] ]] && get_emby_image 4.9.0.31 || get_emby_image
         init="run"
         emd_name="xiaoya-emd"
         entrypoint_mount="entrypoint_emd"
-    elif [[ "${f4_select}" == [3456] ]]; then
+    elif [[ "${f4_select}" == [5678] ]]; then
         search_img="nyanmisaka/jellyfin|jellyfin/jellyfin"
         del_name="jellyfin_xy"
         loop_order="/dev/loop6"
@@ -981,6 +1046,15 @@ function user_select4() {
         init="run_jf"
         emd_name="xiaoya-emd-jf"
         entrypoint_mount="entrypoint_emd_jf"
+    # elif [[ "${f4_select}" == [7] ]]; then
+    #     search_img="emby/embyserver|amilys/embyserver"
+    #     del_name="emby"
+    #     loop_order="/dev/loop7"
+    #     down_path="emby/4.8.0.56"
+    #     get_emby_image 4.8.0.56
+    #     init="run"
+    #     emd_name="xiaoya-emd"
+    #     entrypoint_mount="entrypoint_emd"
     fi
     get_emby_status
 
@@ -1023,7 +1097,11 @@ function user_select4() {
 
     start_time=$(date +%s)
     for i in {1..5}; do
-        remote_size=$(curl -sL -D - -o /dev/null --max-time 10 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg" | grep "Content-Length" | cut -d' ' -f2 | tail -n 1 | tr -d '\r')
+        if [[ $ok_115 =~ ^[Yy]$ ]]; then
+            remote_size=$(curl -sL -D - -o /dev/null --max-time 10 "$docker_addr/d/ailg_jf/115/${down_path}/$emby_ailg" | grep "Content-Length" | cut -d' ' -f2 | tail -n 1 | tr -d '\r')
+        else
+            remote_size=$(curl -sL -D - -o /dev/null --max-time 10 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg" | grep "Content-Length" | cut -d' ' -f2 | tail -n 1 | tr -d '\r')
+        fi
         [[ -n $remote_size ]] && echo -e "remotesize is：${remote_size}" && break
     done
     if [[ $remote_size -lt 100000 ]]; then
@@ -1032,6 +1110,7 @@ function user_select4() {
         echo -e "${Yellow}2、检查alist配置目录的docker_address.txt是否正确指向你的alist访问地址，\n   应为宿主机+5678端口，示例：http://192.168.2.3:5678"
         echo -e "${Yellow}3、检查阿里云盘空间，确保剩余空间大于${space_need}G${NC}"
         echo -e "${Yellow}4、如果打开了阿里快传115，确保有115会员且添加了正确的cookie，不是115会员不要打开阿里快传115！${NC}"
+        echo -e "${Yellow}5、💡使用115通道下载失败，检查5678页ailg_jf/115目录的视频是否能放，如cookie正常但此目录提示重新登陆，重启一次G-Box容器即可！💡${NC}"
         exit 1
     fi
     INFO "远程文件大小获取成功！"
@@ -1443,7 +1522,6 @@ img_uninstall() {
 happy_emby() {
     # declare -ga img_order
     img_order=()
-    get_emby_happy_image
     check_qnap
     # check_loop_support
     get_emby_status > /dev/null
@@ -1483,6 +1561,29 @@ happy_emby() {
                         fi
                     done
 
+                    # 获取当前emby容器使用的镜像版本
+                    current_image=$(docker inspect --format '{{.Config.Image}}' "${happy_name}")
+                    current_version=$(echo "$current_image" | awk -F':' '{print $NF}')
+                    
+                    # 如果无法获取版本号，让用户手动输入
+                    if [[ -z "$current_version" ]]; then
+                        echo -e "\033[1;33m无法自动获取emby版本号，请手动输入版本号。\033[0m"
+                        echo -e "常见版本号示例："
+                        echo -e "4.8.9.0  - 老G速装版默认版本"
+                        echo -e "4.9.0.31 - 老G速装版新版本"
+                        while true; do
+                            read -erp "请输入版本号(格式如: 4.8.9.0): " current_version
+                            if [[ $current_version =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                                break
+                            else
+                                ERROR "版本号格式不正确，请重新输入！"
+                            fi
+                        done
+                    fi
+                    
+                    # 获取开心版镜像
+                    get_emby_happy_image "$current_version"
+
                     docker rm -f "${happy_name}"
                     INFO "旧的${happy_name}容器已删除！"
                     INFO "开始安装小雅emby……"
@@ -1497,7 +1598,16 @@ happy_emby() {
                         --user 0:0 \
                         --net=host \
                         --privileged --add-host="xiaoya.host:$xiaoya_host" --restart always ${emby_image}
+                    
+                    sleep 5
+                    if docker ps --format '{{.Names}}' | grep -q "^${happy_name}$"; then
                         fuck_cors "${happy_name}"
+                        INFO "${Green}恭喜！开心版emby安装成功！${NC}"
+                        INFO "请使用浏览器访问 ${Blue}http://ip:2345${NC} 使用小雅emby"
+                        INFO "如需启用硬解，请使用 ${Blue}http://ip:6908${NC} 访问并自行配置"
+                    else
+                        ERROR "开心版emby安装失败！请检查docker日志:"
+                    fi
                     break
                 else
                     ERROR "您输入的序号无效，请输入一个在 1 到 ${#img_order[@]} 之间的数字。"
@@ -1531,7 +1641,7 @@ mount_img() {
     check_qnap
     # check_loop_support
     get_emby_status > /dev/null
-    update_ailg ailg/ggbond:latest
+    # update_ailg ailg/ggbond:latest
     if [ ! -f /usr/bin/mount_ailg ]; then
         docker cp xiaoya_jf:/var/lib/mount_ailg "/usr/bin/mount_ailg"
         chmod 777 /usr/bin/mount_ailg
@@ -1646,7 +1756,7 @@ expand_img() {
     check_qnap
     # check_loop_support
     get_emby_status > /dev/null
-    update_ailg ailg/ggbond:latest
+    # update_ailg ailg/ggbond:latest
     if [ ! -f /usr/bin/mount_ailg ]; then
         docker cp xiaoya_jf:/var/lib/mount_ailg "/usr/bin/mount_ailg"
         chmod 777 /usr/bin/mount_ailg
@@ -1678,7 +1788,7 @@ expand_img() {
 
             while :; do
                 read -erp "输入序号：" img_select
-                WARN "注：扩容后的镜像体积不能超过物理磁盘空间的70%！当前安装完整小雅emby扩容后镜像不低于160G！建议扩容至200G及以上！"
+                WARN "注：扩容后镜像文件所在磁盘至少保留3G空间，比如所在磁盘\033[1;33m剩余100G\033[0m空间，扩容数值不能超过\033[1;33m97\033[0m！"
                 read -erp "输入您要扩容的大小（单位：GB）：" expand_size
                 if [ "${img_select}" -gt 0 ] && [ "${img_select}" -le ${#img_order[@]} ]; then
                     emby_name=${img_order[$((img_select - 1))]}
@@ -1917,6 +2027,8 @@ user_selecto() {
         echo -e "\n"
         echo -e "\033[1;32m7、修复docker镜像无法拉取（可手动配置镜像代理）\033[0m\033[0m"
         echo -e "\n"
+        echo -e "\033[1;32m8、G-Box安装常用镜像下载（暂不可用，新方案测试中）\033[0m\033[0m"
+        echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
         read -erp "请输入您的选择（1-7，按b返回上级菜单或按q退出）：" fo_select
         case "$fo_select" in
@@ -1948,6 +2060,10 @@ user_selecto() {
             fix_docker
             break
             ;;
+        8)
+            docker_image_download
+            break
+            ;;
         [Bb])
             clear
             main
@@ -1963,6 +2079,106 @@ user_selecto() {
             ;;
         esac
     done
+}
+
+function docker_image_download() {
+    echo -e "\033[1;33m使用本功能请确保您已安装G-Box并正在运行，且G-Box中添加了夸克网盘并正常运行，否则将无法下载！\033[0m"
+    [[ -z $config_dir ]] && get_config_path
+    base_url="$(head -n1 $config_dir/docker_address.txt)"
+    while :; do
+        echo -e "\n请选择CPU架构："
+        echo -e "1. x86_64/amd64"
+        echo -e "2. arm64/aarch64"
+        read -erp "请选择（1-2）：" arch_choice
+        
+        case $arch_choice in
+            1) arch="amd64" ; break ;;
+            2) arch="arm64" ; break ;;
+            *) ERROR "无效的选择" ;;
+        esac
+    done
+    while :; do
+        clear
+        echo -e "\n"
+        echo -e "———————————————————————————————————— \033[1;33mA  I  老  G\033[0m —————————————————————————————————"
+        echo -e "\033[1;35m1、G-Box镜像最新版 (ailg/g-box:hostmode)\033[0m"
+        echo -e "\033[1;35m2、GGBond镜像最新版 (ailg/ggbond:latest)\033[0m"
+        echo -e "\033[1;35m3、Emby官方镜像 4.8.9.0\033[0m"
+        echo -e "\033[1;35m4、Emby官方镜像 4.9.0.31\033[0m"
+        echo -e "\033[1;35m5、Jellyfin官方镜像 10.9.6\033[0m"
+        echo -e "\033[1;35m6、Nyanmisaka Jellyfin最新版\033[0m"
+        echo -e "\033[1;35m7、小雅爬虫镜像ddsderek/xiaoya-emd最新版\033[0m"
+        echo -e "\033[1;35m8、CloudDrive2官方最新版\033[0m"
+        echo -e "——————————————————————————————————————————————————————————————————————————————————"
+        
+        read -erp "请选择要下载的镜像（1-7）：" image_choice
+
+        # 根据选择确定镜像文件名
+        case $image_choice in
+            1) image_file="ailg.gbox.hostmode.${arch}.tar.gz" ; break ;;
+            2) image_file="ailg.ggbond.latest.${arch}.tar.gz" ; break ;;
+            3) image_file="emby.embyserver$([[ $arch == "arm64" ]] && echo "_arm64v8" || echo "").4.8.9.0.${arch}.tar.gz" ; break ;;
+            4) image_file="emby.embyserver$([[ $arch == "arm64" ]] && echo "_arm64v8" || echo "").4.9.0.31.${arch}.tar.gz" ; break ;;
+            5) image_file="jellyfin.jellyfin.10.9.6.${arch}.tar.gz" ; break ;;
+            6) image_file="nyanmisaka.jellyfin.$([[ $arch == "arm64" ]] && echo "latest-rockchip" || echo "latest").${arch}.tar.gz" ; break ;;
+            7) image_file="ddsderek.xiaoya-emd.latest.${arch}.tar.gz" ; break ;;
+            8) image_file="cloudnas.clouddrive2.latest.${arch}.tar.gz" ; break ;;
+            *) ERROR "无效的选择";;
+        esac
+    done
+    
+    # 获取下载目录
+    read -erp "请输入保存镜像的目录路径：" save_dir
+    check_path "$save_dir"
+    
+    # 下载镜像文件
+    download_url="${base_url}/d/AI老G常用分享（夸克）/gbox常用镜像/${image_file}"
+    
+    if docker images | grep -q "ailg/ggbond" && [[ ! $image_file == *"ggbond"* ]]; then
+        INFO "使用ailg/ggbond容器下载镜像..."
+        # 添加文件大小检查
+        docker run --rm \
+            -v "${save_dir}:/ailg" \
+            ailg/ggbond:latest \
+            aria2c -o "/ailg/${image_file}" --auto-file-renaming=false --allow-overwrite=true -c -x6 "${download_url}"
+        
+        if ! [ -f "${save_dir}/${image_file}" ] || [[ -f "${save_dir}/${image_file}.aria2" ]]; then
+            ERROR "镜像文件下载或验证失败"
+            rm -f "${save_dir}/${image_file}"
+            return 1
+        fi
+    else
+        INFO "使用wget下载镜像..."
+        if command -v wget > /dev/null; then
+            wget -O "${save_dir}/${image_file}" "${download_url}"
+        elif command -v curl > /dev/null; then
+            curl -sSLf "${download_url}" -o "${save_dir}/${image_file}"
+        else
+            ERROR "未找到wget或curl，无法下载"
+            return 1
+        fi
+
+        # 验证下载的文件
+        if [[ ! -f "${save_dir}/${image_file}" ]] || \
+           [[ $(stat -c%s "${save_dir}/${image_file}") -lt 1000000 ]] || \
+           ! gunzip -t "${save_dir}/${image_file}" 2>/dev/null; then
+            ERROR "下载的文件无效或损坏"
+            rm -f "${save_dir}/${image_file}"
+            return 1
+        fi
+    fi
+    
+    if [ -f "${save_dir}/${image_file}" ]; then
+        INFO "镜像文件下载完成，正在导入..."
+        if gunzip -c "${save_dir}/${image_file}" | docker load; then
+            INFO "镜像导入成功！"
+        else
+            ERROR "镜像导入失败！"
+        fi
+    else
+        ERROR "镜像文件下载失败！"
+        return 1
+    fi
 }
 
 keys="awk jq grep cp mv kill 7z dirname"
@@ -2299,7 +2515,7 @@ function user_gbox() {
     _update_img="ailg/g-box:hostmode"
     #清理旧容器并更新镜像
     if [[ $re_setup == [Yy] ]]; then
-        image_keywords=("ailg/alist" "xiaoyaliu/alist" "ailg/g-box")
+        image_keywords=("ailg/alist" "xiaoyaliu/alist" "ailg/g-box" "haroldli/xiaoya-tvbox")
         for keyword in "${image_keywords[@]}"; do
             for container_id in $(docker ps -a | grep "$keyword" | awk '{print $1}'); do
                 config_dir=$(docker inspect "$container_id" | jq -r '.[].Mounts[] | select(.Destination=="/data") | .Source')
@@ -2327,7 +2543,8 @@ function user_gbox() {
         fi
     else
         read -erp "请输入小雅g-box的安装路径，使用默认的/etc/xiaoya可直接回车：" config_dir
-        [[ -z $config_dir ]] && config_dir="/etc/xiaoya"
+        # [[ -z $config_dir ]] && config_dir="/etc/xiaoya"
+        config_dir=${config_dir:-"/etc/xiaoya"}
         check_path $config_dir
         INFO "小雅g-box老G版配置路径为：$config_dir"
     fi
@@ -2722,4 +2939,3 @@ else
     fi
     main
 fi
-
