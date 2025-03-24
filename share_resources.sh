@@ -204,12 +204,15 @@ select_share_resources() {
                 
                 # 检查下载的文件是否有效
                 if check_file_valid "$config_dir/$file_name"; then
-                    SUCCESS "成功下载${share_descriptions[$i]}"
+                    INFO "成功下载${share_descriptions[$i]}"
+                    chmod 777 "$config_dir/$file_name"
                 else
                     WARN "下载${share_descriptions[$i]}失败，获取到无效文件"
                     # 删除无效文件
                     rm -f "$config_dir/$file_name"
                 fi
+            else
+                rm -f "$config_dir/$file_name"
             fi
         done
     }
