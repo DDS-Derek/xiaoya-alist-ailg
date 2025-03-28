@@ -149,6 +149,7 @@ download_file() {
 }
 
 # 下载所有脚本
+INFO "正在初始化，请稍后..."
 for file in "${SCRIPT_FILES[@]}"; do
     if download_file "$file"; then
         case "$file" in

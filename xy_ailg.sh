@@ -488,7 +488,7 @@ function user_emby_fast() {
         [Bb])
             clear
             main_menu
-            break
+            return
             ;;
         [Qq])
             exit
@@ -923,6 +923,7 @@ img_uninstall() {
                             exit
                         else
                             main_menu
+                            return
                         fi  
                     else
                         INFO "已卸载${Yellow}${emby_name}${NC}容器，未删除${Yellow}${img_path}${NC}镜像！"
@@ -932,6 +933,7 @@ img_uninstall() {
                             exit
                         else
                             main_menu
+                            return
                         fi
                     fi
                     break
@@ -946,6 +948,7 @@ img_uninstall() {
                 exit
             else
                 main_menu
+                return
             fi
         fi
     else
@@ -955,6 +958,7 @@ img_uninstall() {
             exit
         else
             main_menu
+            return
         fi
     fi
 }
@@ -1475,50 +1479,20 @@ user_selecto() {
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
         read -erp "请输入您的选择（1-7，按b返回上级菜单或按q退出）：" fo_select
         case "$fo_select" in
-        1)
-            ailg_uninstall emby
-            break
-            ;;
-        2)
-            happy_emby
-            break
-            ;;
-        3)
-            mount_img
-            break
-            ;;
-        4)
-            sync_config
-            break
-            ;;
-        5)
-            sync_plan
-            break
-            ;;
-        6)
-            expand_img
-            break
-            ;;
-        7)
-            fix_docker
-            break
-            ;;
-        8)
-            docker_image_download
-            break
-            ;;
-        [Bb])
-            clear
-            main_menu
-            break
-            ;;
-        [Qq])
-            exit
-            ;;
+        1) ailg_uninstall emby; break ;;
+        2) happy_emby; break ;;
+        3) mount_img; break ;;
+        4) sync_config; break ;;
+        5) sync_plan; break ;;
+        6) expand_img; break ;;
+        7) fix_docker; break ;;
+        8) docker_image_download; break ;;
+        [Bb]) clear; main_menu; return ;;
+        [Qq]) exit 0 ;;
         *)
             ERROR "输入错误，按任意键重新输入！"
             read -r -n 1
-            main_menu
+            continue
             ;;
         esac
     done
@@ -2197,11 +2171,12 @@ G-Box：${st_gbox}      \e[33m小雅姐夫（Jellyfin）：${st_jf}      \e[33m�
         2) clear; user_emby_fast ;;
         3) clear; user_jellyfin ;;
         [Oo]) clear; user_selecto ;;
-        [Qq]) return 0 ;;
+        [Qq]) exit 0 ;;
         *)
             ERROR "输入错误，按任意键重新输入！"
             read -r -n 1
             main_menu
+            return
             ;;
     esac
 }
