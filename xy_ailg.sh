@@ -819,6 +819,7 @@ ailg_uninstall() {
             ;;
         esac
     done
+    read -erp -n 1 '按任意键返回主菜单'
     main_menu
 }
 
@@ -1497,6 +1498,7 @@ user_selecto() {
             ;;
         esac
     done
+    read -erp -n 1 '按任意键返回主菜单'
     main_menu
 }
 
@@ -1739,7 +1741,7 @@ function sync_plan() {
         echo -e "\033[1;32m3、立即更新G-Box\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
-        read -erp "输入序号：（1/2）" user_select_sync_ailg
+        read -erp "输入序号：（1-3，按b返回上级菜单或按q退出）" user_select_sync_ailg
         case "$user_select_sync_ailg" in
         1) 
             docker_name="g-box"
@@ -1765,6 +1767,14 @@ function sync_plan() {
             else
                 ERROR "未找到G-Box容器，请先安装G-Box！"
             fi
+            exit 0
+            ;;
+        [Bb])
+            clear
+            main_menu
+            return
+            ;;
+        [Qq])
             exit 0
             ;;
         *)
