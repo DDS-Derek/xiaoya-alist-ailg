@@ -1488,7 +1488,7 @@ user_selecto() {
         6) expand_img; break ;;
         7) fix_docker; break ;;
         8) docker_image_download; break ;;
-        [Bb]) clear; main_menu; return ;;
+        [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
             ERROR "输入错误，按任意键重新输入！"
@@ -1497,6 +1497,7 @@ user_selecto() {
             ;;
         esac
     done
+    main_menu
 }
 
 function docker_image_download() {
