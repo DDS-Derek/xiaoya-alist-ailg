@@ -83,6 +83,7 @@ cleanup() {
         "/tmp/sync_emby_config_ailg.sh"
         "/tmp/cronjob.tmp"
         "/tmp/cron.log"
+        "/tmp/xy_utils.sh"
     )
     
     for file in "${temp_files[@]}"; do
@@ -93,49 +94,80 @@ cleanup() {
 # 注册退出清理
 trap cleanup EXIT INT TERM
 
-# 定义下载源
-SCRIPT_URLS=(
-    "https://ailg.ggbond.org/xy_ailg.sh"
-    "https://gbox.ggbond.org/xy_ailg.sh"
-    "https://xy.ggbond.org/xy/xy_ailg.sh"
+# 定义基础URL和文件
+BASE_URLS=(
+    "https://ailg.ggbond.org"
+    "https://gbox.ggbond.org"
+    "https://xy.ggbond.org/xy"
 )
 
-# 下载主脚本
-download_success=0
-for url in "${SCRIPT_URLS[@]}"; do
-    if command -v curl >/dev/null 2>&1; then
-        download_cmd="curl -sL --connect-timeout 20 $url -o /tmp/xy_ailg.sh"
-    else
-        download_cmd="wget -qO /tmp/xy_ailg.sh --timeout=20 $url"
-    fi
+SCRIPT_FILES=(
+    "xy_ailg.sh"
+    "xy_utils.sh"
+)
 
-    if eval "$download_cmd"; then
-        if [ -s /tmp/xy_ailg.sh ]; then
-            if grep -q "fuck_docker" /tmp/xy_ailg.sh; then
-                download_success=1
-                break
-            else
-                rm -f /tmp/xy_ailg.sh
-            fi
+# 下载脚本
+utils_success=0
+download_file() {
+    local file=$1
+    local success=0
+    
+    for base_url in "${BASE_URLS[@]}"; do
+        local url="${base_url}/${file}"
+        if command -v curl >/dev/null 2>&1; then
+            download_cmd="curl -sL --connect-timeout 20 $url -o /tmp/${file}"
         else
-            rm -f /tmp/xy_ailg.sh
+            download_cmd="wget -qO /tmp/${file} --timeout=20 $url"
         fi
-    else
-        WARN "从 ${url} 下载失败,尝试其他源..."
+
+        if eval "$download_cmd"; then
+            if [ -s "/tmp/${file}" ]; then
+                case "$file" in
+                    "xy_ailg.sh")
+                        if grep -q "fuck_docker" "/tmp/${file}"; then
+                            success=1
+                            break
+                        fi
+                        ;;
+                    "xy_utils.sh")
+                        if grep -q "setup_colors" "/tmp/${file}"; then
+                            success=1
+                            break
+                        fi
+                        ;;
+                esac
+            fi
+            rm -f "/tmp/${file}"
+        else
+            WARN "从 ${url} 下载失败,尝试其他源..."
+        fi
+    done
+    
+    return $success
+}
+
+# 下载所有脚本
+for file in "${SCRIPT_FILES[@]}"; do
+    if download_file "$file"; then
+        case "$file" in
+            "xy_ailg.sh") download_success=1 ;;
+            "xy_utils.sh") utils_success=1 ;;
+        esac
     fi
 done
 
-if [ $download_success -eq 1 ]; then
+if [ $download_success -eq 1 ] && [ $utils_success -eq 1 ]; then
     # 添加执行权限
     chmod +x /tmp/xy_ailg.sh
+    chmod +x /tmp/xy_utils.sh
     
     # 执行主脚本
     INFO "初始化完成..."
     bash /tmp/xy_ailg.sh "$@"
-
-    rm -f /tmp/xy_ailg.sh
     
 else
-    ERROR "所有下载源均失败,请检查网络连接后重试!"
+    ERROR "脚本下载失败,请检查网络连接后重试!"
+    [ $download_success -eq 0 ] && ERROR "主脚本下载失败"
+    [ $utils_success -eq 0 ] && ERROR "工具脚本下载失败"
     exit 1
 fi 
