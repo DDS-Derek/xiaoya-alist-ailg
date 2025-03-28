@@ -819,7 +819,7 @@ ailg_uninstall() {
             ;;
         esac
     done
-    read -erp -n 1 '按任意键返回主菜单'
+    read -n 1 -rp "按任意键返回主菜单"
     main_menu
 }
 
@@ -1498,7 +1498,7 @@ user_selecto() {
             ;;
         esac
     done
-    read -erp -n 1 '按任意键返回主菜单'
+    read -n 1 -rp "按任意键返回主菜单"
     main_menu
 }
 
