@@ -104,20 +104,25 @@ SCRIPT_URLS=(
 download_success=0
 for url in "${SCRIPT_URLS[@]}"; do
     if command -v curl >/dev/null 2>&1; then
-        download_cmd="curl -sL $url -o /tmp/xy_ailg.sh"
+        download_cmd="curl -L $url -o /tmp/xy_ailg.sh"
     else
-        download_cmd="wget -qO /tmp/xy_ailg.sh $url"
+        download_cmd="wget -O /tmp/xy_ailg.sh $url"
     fi
 
+    INFO "正在从 ${url} 下载脚本..."
     if eval "$download_cmd"; then
         if [ -s /tmp/xy_ailg.sh ]; then
+            INFO "文件下载成功，检查文件内容..."
             if grep -q "function main_menu" /tmp/xy_ailg.sh; then
                 download_success=1
+                INFO "脚本验证成功！"
                 break
             else
+                WARN "下载的文件内容不正确"
                 rm -f /tmp/xy_ailg.sh
             fi
         else
+            WARN "下载的文件为空"
             rm -f /tmp/xy_ailg.sh
         fi
     else
@@ -136,6 +141,10 @@ if [ $download_success -eq 1 ]; then
     rm -f /tmp/xy_ailg.sh
     
 else
-    ERROR "所有下载源均失败,请检查网络连接后重试!"
+    ERROR "所有下载源均失败！"
+    ERROR "请尝试以下方法："
+    ERROR "1. 检查网络连接"
+    ERROR "2. 手动下载脚本：curl -L https://ailg.ggbond.org/xy_ailg.sh -o /tmp/xy_ailg.sh"
+    ERROR "3. 如果手动下载成功，直接执行：bash /tmp/xy_ailg.sh"
     exit 1
 fi 
