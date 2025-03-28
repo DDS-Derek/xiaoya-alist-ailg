@@ -104,9 +104,9 @@ SCRIPT_URLS=(
 download_success=0
 for url in "${SCRIPT_URLS[@]}"; do
     if command -v curl >/dev/null 2>&1; then
-        download_cmd="curl -sL --connect-timeout 20 $url -o /tmp/xy_ailg.sh"
+        download_cmd="curl -sL $url -o /tmp/xy_ailg.sh"
     else
-        download_cmd="wget -qO /tmp/xy_ailg.sh --timeout=20 $url"
+        download_cmd="wget -qO /tmp/xy_ailg.sh $url"
     fi
 
     if eval "$download_cmd"; then
