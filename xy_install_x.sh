@@ -112,7 +112,7 @@ download_success=0
 
 download_file() {
     local file=$1
-    local success=0
+    local success=1
     
     for base_url in "${BASE_URLS[@]}"; do
         local url="${base_url}/${file}"
@@ -127,19 +127,19 @@ download_file() {
                 case "$file" in
                     "xy_ailg.sh")
                         if grep -q "fuck_docker" "/tmp/${file}"; then
-                            success=1
+                            success=0
                             break
                         fi
                         ;;
                     "xy_utils.sh")
                         if grep -q "setup_colors" "/tmp/${file}"; then
-                            success=1
+                            success=0
                             break
                         fi
                         ;;
                 esac
             fi
-            [ $success -eq 0 ] && rm -f "/tmp/${file}"
+            [ $success -eq 1 ] && rm -f "/tmp/${file}"
         else
             WARN "从 ${url} 下载失败,尝试其他源..."
         fi
