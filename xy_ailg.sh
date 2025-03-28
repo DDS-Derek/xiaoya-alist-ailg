@@ -819,6 +819,7 @@ ailg_uninstall() {
             ;;
         esac
     done
+    main_menu
 }
 
 sp_uninstall() {
