@@ -20,7 +20,6 @@ export PATH
 # 作者很菜，无法经常更新，不保证适用每个人的环境，请勿用于商业用途；
 #
 # 如果您喜欢这个脚本，可以请我喝咖啡：https://ailg.ggbond.org/3q.jpg
-#
 # ——————————————————————————————————————————————————————————————————————————————————
 
 Green="\033[32m"
@@ -105,9 +104,9 @@ SCRIPT_URLS=(
 download_success=0
 for url in "${SCRIPT_URLS[@]}"; do
     if command -v curl >/dev/null 2>&1; then
-        download_cmd="curl -sL --connect-timeout 10 $url -o /tmp/xy_ailg.sh"
+        download_cmd="curl -sL --connect-timeout 20 $url -o /tmp/xy_ailg.sh"
     else
-        download_cmd="wget -qO /tmp/xy_ailg.sh --timeout=10 $url"
+        download_cmd="wget -qO /tmp/xy_ailg.sh --timeout=20 $url"
     fi
 
     if eval "$download_cmd"; then
