@@ -108,6 +108,8 @@ SCRIPT_FILES=(
 
 # 下载脚本
 utils_success=0
+download_success=0
+
 download_file() {
     local file=$1
     local success=0
@@ -137,7 +139,7 @@ download_file() {
                         ;;
                 esac
             fi
-            rm -f "/tmp/${file}"
+            [ $success -eq 0 ] && rm -f "/tmp/${file}"
         else
             WARN "从 ${url} 下载失败,尝试其他源..."
         fi
