@@ -2160,8 +2160,9 @@ temp_gbox() {
 
     docker rm -f ${docker_name}
     docker rmi ailg/g-box:hostmode
-    if docker pull ailg/g-box:hostmode &> /dev/null; then
+    if docker_pull ailg/g-box:250330 &> /dev/null; then
         INFO "G-Box镜像更新成功，正在为您安装/更新G-Box容器……"
+        docker tag ailg/g-box:250330 ailg/g-box:hostmode
     else
         ERROR "G-Box镜像更新失败，程序退出！"
         exit 1
