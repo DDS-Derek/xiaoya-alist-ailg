@@ -2136,16 +2136,7 @@ temp_gbox() {
     INFO "正在使用临时方法更新/安装G-Box容器……"
     [ -z "${config_dir}" ] && get_config_path
     docker_name="$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)" 
-    if [ -z "${docker_name}" ]; then
-        WARN "您未安装G-Box容器，是否立即安装？（Y/N）  " && read -r -n 1 get_install
-        case $get_install in
-        [Yy]*)
-            user_gbox
-            exit 0
-            ;;
-        *) exit 0 ;;    
-        esac
-    fi
+    docker_name="${docker_name:-g-box}"
 
     read -erp "$(INFO "是否打开docker容器管理功能？（y/n）")" open_warn
     if [[ $open_warn == [Yy] ]]; then
