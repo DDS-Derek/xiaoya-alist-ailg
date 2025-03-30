@@ -2132,6 +2132,59 @@ update_data() {
     fi
 }
 
+temp_gbox() {
+    INFO "正在使用临时方法更新/安装G-Box容器……"
+    [ -z "${config_dir}" ] && get_config_path
+    docker_name="$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)" 
+    if [ -z "${docker_name}" ]; then
+        WARN "您未安装G-Box容器，是否立即安装？（Y/N）  " && read -r -n 1 get_install
+        case $get_install in
+        [Yy]*)
+            user_gbox
+            exit 0
+            ;;
+        *) exit 0 ;;    
+        esac
+    fi
+
+    read -erp "$(INFO "是否打开docker容器管理功能？（y/n）")" open_warn
+    if [[ $open_warn == [Yy] ]]; then
+        echo -e "${Yellow}风险警示："
+        echo -e "打开docker容器管理功能会挂载/var/run/docker.sock！"
+        echo -e "想在G-Box首页Sun-Panel中管理docker容器必须打开此功能！！"
+        echo -e "想实现G-Box重启自动更新或添加G-Box自定义挂载必须打开此功能！！"
+        echo -e "${Red}打开此功能会获取所有容器操作权限，有一定安全风险，确保您有良好的风险防范意识和妥当操作能力，否则不要打开此功能！！！"
+        echo -e "如您已打开此功能想要关闭，请重新安装G-Box，重新进行此项选择！${NC}"
+        read -erp "$(WARN "是否继续开启docker容器管理功能？（y/n）")" open_sock
+    fi
+
+    docker rm -f ${docker_name}
+    docker rmi ailg/g-box:hostmode
+    if docker pull ailg/g-box:hostmode &> /dev/null; then
+        INFO "G-Box镜像更新成功，正在为您安装/更新G-Box容器……"
+    else
+        ERROR "G-Box镜像更新失败，程序退出！"
+        exit 1
+    fi
+
+    if [[ $open_sock == [Yy] ]]; then
+        docker run -d --name="${docker_name}" --net=host \
+            -v "$config_dir":/data \
+            -v "$config_dir/data":/www/data \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            --restart=always \
+            ailg/g-box:hostmode
+    else
+        docker run -d --name="${docker_name}" --net=host \
+            -v "$config_dir":/data \
+            -v "$config_dir/data":/www/data \
+            --restart=always \
+            ailg/g-box:hostmode
+    fi
+
+    [ $? -eq 0 ] && INFO "G-Box容器已成功安装/更新，请检查！" || ERROR "G-Box容器安装/更新失败，程序退出    ！"
+}
+
 main_menu() {
     clear
     st_gbox=$(setup_status "$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)")
@@ -2200,6 +2253,9 @@ case $1 in
         ;;
     "update_data")
         update_data
+        ;;
+    "temp-gbox")
+        temp_gbox
         ;;
     *)
         main_menu
