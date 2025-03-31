@@ -2173,6 +2173,7 @@ temp_gbox() {
 
     docker rm -f ${docker_name}
     docker rmi ailg/g-box:hostmode
+    INFO "正在为您摘取G-Box临时镜像……"
     if docker_pull "ailg/g-box:${gb_version_tag}" &> /dev/null; then
         INFO "G-Box镜像更新成功，正在为您安装/更新G-Box容器……"
         docker tag "ailg/g-box:${gb_version_tag}" ailg/g-box:hostmode
