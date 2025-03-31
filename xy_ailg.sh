@@ -633,7 +633,7 @@ function user_emby_fast() {
     fi
     #get_emby_image
     #if [ ! -f "$image_dir/${init}" ]; then
-        rm -f "$image_dir/${init}"
+        rm -rf "$image_dir/${init}"
         docker cp "${docker_name}":/var/lib/${init} "$image_dir/"
         chmod 777 "$image_dir/${init}"
     #fi
@@ -1855,7 +1855,10 @@ function user_gbox() {
             done
         done
 
-        update_ailg "${_update_img}"
+        if ! update_ailg "${_update_img}"; then
+            ERROR "G-Box镜像拉取失败，请检查网络环境或稍后再试！"
+            exit 1
+        fi
     else
         main_menu
         return
@@ -1870,13 +1873,13 @@ function user_gbox() {
             echo -e "\033[1;35m请输入您的小雅g-box配置文件路径:\033[0m"
             read -r config_dir
             check_path $config_dir
-            INFO "小雅g-box老G版配置路径为：$config_dir"
+            INFO "G-Box配置路径为：$config_dir"
         fi
     else
-        read -erp "请输入小雅g-box的安装路径，使用默认的/etc/xiaoya可直接回车：" config_dir
-        config_dir=${config_dir:-"/etc/xiaoya"}
+        read -erp "请输入G-Box的安装路径，使用默认的/etc/g-box可直接回车：" config_dir
+        config_dir=${config_dir:-"/etc/g-box"}
         check_path $config_dir
-        INFO "小雅g-box老G版配置路径为：$config_dir"
+        INFO "G-Box配置路径为：$config_dir"
     fi
 
     read -erp "$(INFO "是否打开docker容器管理功能？（y/n）")" open_warn
@@ -1948,7 +1951,7 @@ function user_gbox() {
     [ ! -s $config_dir/emby_server.txt ] && echo "http://127.0.0.1:6908" > $config_dir/emby_server.txt
     [ ! -s $config_dir/jellyfin_server.txt ] && echo "http://127.0.0.1:6909" > $config_dir/jellyfin_server.txt
 
-    INFO "${Blue}哇塞！你的小雅g-box老G版安装完成了！$NC"
+    INFO "${Blue}哇塞！你的G-Box安装完成了！$NC"
     INFO "${Blue}如果你没有配置mytoken.txt和myopentoken.txt文件，请登陆\033[1;35mhttp://${localip}:4567\033[0m网页在'账号-详情'中配置！$NC"
     INFO "G-Box初始登陆${Green}用户名：admin\t密码：admin ${NC}"
     INFO "内置sun-panel导航初始登陆${Green}用户名：ailg666\t\t密码：12345678 ${NC}"
@@ -2043,6 +2046,9 @@ fuck_docker() {
     echo -e "\033[1;33m6、仅首次运行或docker_mirrors.txt文件不存在或文件中代理失效时需要测速！为了后续顺利安装请耐心等待！\033[0m"
     echo -e "——————————————————————————————————————————————————————————————————————————————————"
     read -erp "$(echo -e "\033[1;32m跳过测速将使用您当前网络和环境设置直接拉取镜像，是否跳过？（Y/N）\n\033[0m")" skip_choose_mirror
+    if ! [[ "$skip_choose_mirror" == [Yy] ]]; then
+        choose_mirrors
+    fi
 }
 
 update_gbox() {
@@ -2232,24 +2238,24 @@ G-Box：${st_gbox}      \e[33m小雅姐夫（Jellyfin）：${st_jf}      \e[33m�
     esac
 }
 
-fuck_docker
-if ! [[ "$skip_choose_mirror" == [Yy] ]]; then
-    choose_mirrors
-fi
+
 check_root
 check_env
 
 case $1 in
     "g-box")
+        fuck_docker
         update_gbox
         ;;
     "update_data")
         update_data
         ;;
     "temp-gbox")
+        fuck_docker
         temp_gbox
         ;;
     *)
+        fuck_docker
         main_menu
         ;;
 esac
