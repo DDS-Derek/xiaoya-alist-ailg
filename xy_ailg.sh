@@ -2144,6 +2144,22 @@ temp_gbox() {
     docker_name="$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)" 
     docker_name="${docker_name:-g-box}"
 
+    # 获取GB版本号并提取日期值作为tag
+    local gb_version=""
+    for i in {1..3}; do
+        gb_version=$(curl -sSLf https://ailg.ggbond.org/GB_version)
+        if [[ "${gb_version}" =~ ^GB\.([0-9]{6})\.[0-9]{4}$ ]]; then
+            gb_version_tag="${BASH_REMATCH[1]}"
+            break
+        fi
+        sleep 1
+    done
+
+    if [ -z "$gb_version_tag" ]; then
+        ERROR "无法获取有效的GB版本号，程序退出！"
+        exit 1
+    fi
+
     read -erp "$(INFO "是否打开docker容器管理功能？（y/n）")" open_warn
     if [[ $open_warn == [Yy] ]]; then
         echo -e "${Yellow}风险警示："
@@ -2157,9 +2173,9 @@ temp_gbox() {
 
     docker rm -f ${docker_name}
     docker rmi ailg/g-box:hostmode
-    if docker_pull ailg/g-box:250330 &> /dev/null; then
+    if docker_pull "ailg/g-box:${gb_version_tag}" &> /dev/null; then
         INFO "G-Box镜像更新成功，正在为您安装/更新G-Box容器……"
-        docker tag ailg/g-box:250330 ailg/g-box:hostmode
+        docker tag "ailg/g-box:${gb_version_tag}" ailg/g-box:hostmode
     else
         ERROR "G-Box镜像更新失败，程序退出！"
         exit 1
@@ -2180,7 +2196,7 @@ temp_gbox() {
             ailg/g-box:hostmode
     fi
 
-    [ $? -eq 0 ] && INFO "G-Box容器已成功安装/更新，请检查！" || ERROR "G-Box容器安装/更新失败，程序退出    ！"
+    [ $? -eq 0 ] && INFO "G-Box容器用临时镜像成功安装/更新，但下次重启仍会更新标准版镜像，可关闭重启自动更新功能，确认网络可正常更新后再打开！" || ERROR "G-Box容器安装/更新失败，程序退出！"
 }
 
 main_menu() {
