@@ -73,10 +73,9 @@ function docker_pull() {
     fi
     end_time=$SECONDS
     execution_time=$((end_time - start_time))
-    echo "代码执行时间：${execution_time} 秒"
     minutes=$((execution_time / 60))
     seconds=$((execution_time % 60))
-    echo "代码执行时间：${minutes} 分 ${seconds} 秒"
+    echo "测速执行时间：${minutes} 分 ${seconds} 秒"
 
     mirrors=()
     INFO "正在从${config_dir}/docker_mirrors.txt文件获取代理点配置……"
@@ -156,7 +155,11 @@ if [ -n "$1" ];then
 else
     while :; do
         read -erp "请输入您要拉取镜像的完整名字（示例：ailg/alist:latest）：" pull_img
-        [ -n "${pull_img}" ] && break
+        [ -z "${pull_img}" ] && ERROR "镜像名称不能为空，请重新输入！" && continue
+        read -erp "测速会创建一个docker_mirrors.txt文件，请输入该文件存放的目录：" config_dir
+        config_dir=${config_dir:-"/etc/xiaoya"}
+        [ -d "${config_dir}" ] && break
+        ERROR "您输入的文件存放目录不存在，请重新输入！" && continue
     done
-    docker_pull "${pull_img}"
+    docker_pull "${pull_img}" "${config_dir}"
 fi
