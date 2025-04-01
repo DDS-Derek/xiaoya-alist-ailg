@@ -45,24 +45,29 @@ function docker_pull() {
     if [ ! -f "${config_dir}/docker_mirrors.txt" ]; then
         echo -e "\033[1;32m正在进行代理测速，为您选择最佳代理……\033[0m"
         for i in "${!mirrors[@]}"; do
-            total_delay=0
-            success=true
-            for n in {1..3}; do
-                output=$(
-                    curl -s -o /dev/null -w '%{time_total}' --head --request GET --connect-timeout 10 "${mirrors[$i]}"
-                    [ $? -ne 0 ] && success=false && break
-                )
-                total_delay=$(echo "$total_delay + $output" | awk '{print $1 + $3}')
-            done
-            if $success && docker pull "${mirrors[$i]}/library/hello-world:latest" &> /dev/null; then
-                mirror_total_delays["${mirrors[$i]}"]=$total_delay 
-                docker rmi "${mirrors[$i]}/library/hello-world:latest" &> /dev/null
-            else
+            mirror="${mirrors[$i]}"
+            echo -e "\033[1;34m正在测试 $mirror...\033[0m"
+            
+            # 测试连接延迟
+            output=$(curl -s -o /dev/null -w '%{time_total}' --head --request GET --connect-timeout 10 "$mirror" 2>/dev/null)
+            if [ $? -ne 0 ]; then
+                echo -e "\033[1;31m  - $mirror 连接测试失败\033[0m"
                 continue
             fi
+            echo -e "\033[1;32m  - $mirror 连接延迟: ${output}s\033[0m"
+            
+            # 测试镜像拉取
+            echo -e "\033[1;34m  - 测试 $mirror 拉取镜像...\033[0m"
+            if docker pull "${mirrors[$i]}/library/hello-world:latest" &> /dev/null; then
+                echo -e "\033[1;32m  - $mirror 镜像拉取成功\033[0m"
+                mirror_total_delays["$mirror"]=$output
+                docker rmi "${mirror}/library/hello-world:latest" &> /dev/null
+            else
+                echo -e "\033[1;31m  - $mirror 镜像拉取失败\033[0m"
+            fi
         done
+        
         if [ ${#mirror_total_delays[@]} -eq 0 ]; then
-            #echo "docker.io" > "${config_dir}/docker_mirrors.txt"
             echo -e "\033[1;31m所有代理测试失败，已恢复为官方docker镜像源，检查网络或配置可用代理后重新运行脚本，请从主菜单手动退出！\033[0m"
         else
             sorted_mirrors=$(for k in "${!mirror_total_delays[@]}"; do echo $k ${mirror_total_delays["$k"]}; done | sort -n -k2)
