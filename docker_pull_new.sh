@@ -28,25 +28,19 @@ function docker_pull() {
     #[ -z "${config_dir}" ] && get_config_path
     start_time=$SECONDS
     local config_dir=${2:-"/etc/xiaoya"}
-    # mirrors=("docker.io" "docker.fxxk.dedyn.io" "docker.adysec.com" "registry-docker-hub-latest-9vqc.onrender.com" "docker.chenby.cn" "dockerproxy.com" "hub.uuuadc.top" "docker.jsdelivr.fyi" "docker.registry.cyou" "dockerhub.anzu.vip")
     mirrors=(
         "docker.io"
-        "docker.chenby.cn"
-        "docker.nastool.de"
         "hub.rat.dev"
-        "docker.fxxk.dedyn.io"
-        "docker.adysec.com"
-        "registry-docker-hub-latest-9vqc.onrender.com"
-        "docker.chenby.cn"
-        "dockerproxy.com"
-        "hub.uuuadc.top"
-        "docker.jsdelivr.fyi"
-        "docker.registry.cyou"
-        "dockerhub.anzu.vip"
-        "docker.1panel.live"
+        "docker.1ms.run"
+        "dk.nastool.de"
         "docker.aidenxin.xyz"
-        "dhub.kubesre.xyz"
-        )
+        "dockerhub.anzu.vip"
+        "proxy.1panel.live"
+        "freeno.xyz"
+        "docker.adysec.com"
+        "dockerhub.icu"
+        "docker.fxxk.dedyn.io"
+    )
     declare -A mirror_total_delays
     if [ ! -f "${config_dir}/docker_mirrors.txt" ]; then
         echo -e "\033[1;32m正在进行代理测速，为您选择最佳代理……\033[0m"
@@ -64,7 +58,7 @@ function docker_pull() {
                 mirror_total_delays["${mirrors[$i]}"]=$total_delay 
                 docker rmi "${mirrors[$i]}/library/hello-world:latest" &> /dev/null
             else
-                break
+                continue
             fi
         done
         if [ ${#mirror_total_delays[@]} -eq 0 ]; then
@@ -90,18 +84,23 @@ function docker_pull() {
         mirrors+=("$line")
     done < "${config_dir}/docker_mirrors.txt"
 
-    if command -v timeout > /dev/null 2>&1;then
+    local pull_success=false
+    local last_mirror=""
+    
+    if command -v timeout > /dev/null 2>&1; then
         for mirror in "${mirrors[@]}"; do
+            last_mirror="${mirror}"
             INFO "正在从${mirror}代理点为您下载镜像……"
             #local_sha=$(timeout 300 docker pull "${mirror}/${1}" 2>&1 | grep 'Digest: sha256' | awk -F':' '{print $3}')
-            [ command -v mktemp ] && tempfile=$(mktemp) || tempfile="/tmp/ailg_temp.txt"
+            command -v mktemp >/dev/null 2>&1 && tempfile=$(mktemp) || tempfile="/tmp/ailg_temp.txt"
             timeout 300 docker pull "${mirror}/${1}" | tee "$tempfile"
             local_sha=$(grep 'Digest: sha256' "$tempfile" | awk -F':' '{print $3}')
-            rm "$tempfile"
+            rm -f "$tempfile"
 
             if [ -n "${local_sha}" ]; then
                 sed -i "\#${1}#d" "${config_dir}/ailg_sha.txt"
                 echo "${1} ${local_sha}" >> "${config_dir}/ailg_sha.txt"
+                pull_success=true
                 [[ "${mirror}" == "docker.io" ]] && return 0
                 break
             else
@@ -110,8 +109,10 @@ function docker_pull() {
         done
     else
         for mirror in "${mirrors[@]}"; do
+            last_mirror="${mirror}"
             INFO "正在从${mirror}代理点为您下载镜像……"
             timeout=200
+            > "/tmp/tmp_sha"  # 清空文件
             (docker pull "${mirror}/${1}" 2>&1 | grep 'Digest: sha256' | awk -F':' '{print $3}' > "/tmp/tmp_sha") &
             pid=$!
             count=0
@@ -124,13 +125,15 @@ function docker_pull() {
                     break
                 fi
             done
-            local_sha=$(cat "/tmp/tmp_sha")
-            rm "/tmp/tmp_sha"
+            [ -f "/tmp/tmp_sha" ] && local_sha=$(cat "/tmp/tmp_sha") || local_sha=""
+            [ -f "/tmp/tmp_sha" ] && rm -f "/tmp/tmp_sha"
+            
             if [ -n "${local_sha}" ]; then
                 INFO "${1} 镜像拉取成功！"
                 #sed -i "/"${1}"/d" "${config_dir}/ailg_sha.txt"
                 sed -i "\#${1}#d" "${config_dir}/ailg_sha.txt"
                 echo "${1} ${local_sha}" >> "${config_dir}/ailg_sha.txt"
+                pull_success=true
                 [[ "${mirror}" == "docker.io" ]] && return 0
                 break
             else
@@ -139,9 +142,8 @@ function docker_pull() {
         done
     fi
 
-    if [ -n "$(docker images -q "${mirror}/${1}")" ]; then
-        docker tag "${mirror}/${1}" "${1}"
-        docker rmi "${mirror}/${1}"
+    if $pull_success || [ -n "$(docker images -q "${last_mirror}/${1}")" ]; then
+        [ -n "$(docker images -q "${last_mirror}/${1}")" ] && docker tag "${last_mirror}/${1}" "${1}" && docker rmi "${last_mirror}/${1}"
         return 0
     else
         ERROR "已尝试所有镜像代理拉取失败，程序退出，请检查网络后再试！"
