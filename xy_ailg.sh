@@ -1641,7 +1641,7 @@ fix_docker() {
         exit 1
     fi
 
-    REGISTRY_URLS=('https://hub.rat.dev' 'https://docker.1ms.run' 'dockerhub.anzu.vip')
+    REGISTRY_URLS=('https://hub.rat.dev' 'https://docker.1ms.run' 'https://dockerhub.anzu.vip' 'https://freeno.xyz' 'https://dk.nastool.de' 'https://docker.fxxk.dedyn.io')
 
     DOCKER_CONFIG_FILE=''
     BACKUP_FILE=''
