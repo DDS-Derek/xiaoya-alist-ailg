@@ -154,9 +154,9 @@ if [ -n "$1" ];then
     docker_pull $1 $2
 else
     while :; do
-        read -erp "请输入您要拉取镜像的完整名字（示例：ailg/alist:latest）：" pull_img
+        read -erp "[${Blue}提示${NC}]请输入您要拉取镜像的完整名字（示例：ailg/alist:latest）：" pull_img
         [ -z "${pull_img}" ] && ERROR "镜像名称不能为空，请重新输入！" && continue
-        read -erp "测速会创建一个docker_mirrors.txt文件，请输入该文件存放的目录：" config_dir
+        read -erp "[${Blue}提示${NC}]测速会创建一个docker_mirrors.txt文件，请输入该文件存放的目录：" config_dir
         config_dir=${config_dir:-"/etc/xiaoya"}
         [ -d "${config_dir}" ] && break
         ERROR "您输入的文件存放目录不存在，请重新输入！" && continue
