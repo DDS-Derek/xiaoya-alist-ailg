@@ -1071,10 +1071,6 @@ get_img_path() {
     case "${img_name}" in
     "emby-ailg-115.img" | "emby-ailg-lite-115.img" | "jellyfin-ailg.img" | "jellyfin-ailg-lite.img" | "jellyfin-10.9.6-ailg-lite.img" | "jellyfin-10.9.6-ailg.img") ;;
     "emby-ailg-115-4.9.img" | "emby-ailg-lite-115-4.9.img") ;;
-    "emby-ailg-115.mp4" | "emby-ailg-lite-115.mp4" | "jellyfin-ailg.mp4" | "jellyfin-ailg-lite.mp4" | "jellyfin-10.9.6-ailg-lite.mp4" | "jellyfin-10.9.6-ailg.mp4") ;;
-    "emby-ailg-115-4.9.mp4" | "emby-ailg-lite-115-4.9.mp4")
-        img_path="${img_path%.mp4}.img"
-        ;;
     *)
         ERROR "您输入的不是老G的镜像，或已改名，确保文件名正确后重新运行脚本！"
         exit 1
@@ -2150,22 +2146,14 @@ temp_gbox() {
 
     # 获取GB版本号并提取日期值作为tag
     local gb_version=""
-    if [ -n "$1 " ]; then
-        gb_version_tag="$1"
-        if ! [[ "${gb_version_tag}" =~ ^([0-9]{6})$ ]]; then
-            ERROR "输入的GB版本号格式不正确，请输入正确的GB版本号！"
-            exit 1
-        fi  
-    else
-        for i in {1..3}; do
-            gb_version=$(curl -sSLf https://ailg.ggbond.org/GB_version)
+    for i in {1..3}; do
+        gb_version=$(curl -sSLf https://ailg.ggbond.org/GB_version)
         if [[ "${gb_version}" =~ ^GB\.([0-9]{6})\.[0-9]{4}$ ]]; then
             gb_version_tag="${BASH_REMATCH[1]}"
             break
         fi
-            sleep 1
-        done
-    fi
+        sleep 1
+    done
 
     if [ -z "$gb_version_tag" ]; then
         ERROR "无法获取有效的GB版本号，程序退出！"
@@ -2281,7 +2269,7 @@ case $1 in
         ;;
     "temp-gbox")
         fuck_docker
-        [ -z "$2" ] && temp_gbox || temp_gbox $2
+        temp_gbox
         ;;
     *)
         fuck_docker
