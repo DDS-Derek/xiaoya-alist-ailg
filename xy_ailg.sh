@@ -2146,14 +2146,22 @@ temp_gbox() {
 
     # 获取GB版本号并提取日期值作为tag
     local gb_version=""
-    for i in {1..3}; do
-        gb_version=$(curl -sSLf https://ailg.ggbond.org/GB_version)
+    if [ -n "$1 " ]; then
+        gb_version_tag="$1"
+        if ! [[ "${gb_version_tag}" =~ ^([0-9]{6})$ ]]; then
+            ERROR "输入的GB版本号格式不正确，请输入正确的GB版本号！"
+            exit 1
+        fi  
+    else
+        for i in {1..3}; do
+            gb_version=$(curl -sSLf https://ailg.ggbond.org/GB_version)
         if [[ "${gb_version}" =~ ^GB\.([0-9]{6})\.[0-9]{4}$ ]]; then
             gb_version_tag="${BASH_REMATCH[1]}"
             break
         fi
-        sleep 1
-    done
+            sleep 1
+        done
+    fi
 
     if [ -z "$gb_version_tag" ]; then
         ERROR "无法获取有效的GB版本号，程序退出！"
@@ -2269,7 +2277,7 @@ case $1 in
         ;;
     "temp-gbox")
         fuck_docker
-        temp_gbox
+        [ -z "$2" ] && temp_gbox || temp_gbox $2
         ;;
     *)
         fuck_docker
