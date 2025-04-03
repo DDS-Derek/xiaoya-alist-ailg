@@ -1071,10 +1071,6 @@ get_img_path() {
     case "${img_name}" in
     "emby-ailg-115.img" | "emby-ailg-lite-115.img" | "jellyfin-ailg.img" | "jellyfin-ailg-lite.img" | "jellyfin-10.9.6-ailg-lite.img" | "jellyfin-10.9.6-ailg.img") ;;
     "emby-ailg-115-4.9.img" | "emby-ailg-lite-115-4.9.img") ;;
-    "emby-ailg-115.mp4" | "emby-ailg-lite-115.mp4" | "jellyfin-ailg.mp4" | "jellyfin-ailg-lite.mp4" | "jellyfin-10.9.6-ailg-lite.mp4" | "jellyfin-10.9.6-ailg.mp4") ;;
-    "emby-ailg-115-4.9.mp4" | "emby-ailg-lite-115-4.9.mp4")
-        img_path="${img_path%.mp4}.img"
-        ;;
     *)
         ERROR "您输入的不是老G的镜像，或已改名，确保文件名正确后重新运行脚本！"
         exit 1
