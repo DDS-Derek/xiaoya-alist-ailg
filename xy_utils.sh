@@ -868,6 +868,8 @@ restore_containers_simple() {
             in_ports=1
         elif [[ "$line" == "PORTS_END" ]]; then
             in_ports=0
+        elif [[ "$line" == CONTAINER_STATUS=* ]]; then
+            container_status="${line#CONTAINER_STATUS=}"
         elif [[ "$line" == "CONTAINER_END" ]]; then
             # 恢复容器
             restore_single_container
@@ -879,14 +881,13 @@ restore_containers_simple() {
             mounts=""
             env_vars=""
             ports=""
+            container_status=""
         elif [ $in_mounts -eq 1 ]; then
             mounts="$line"
         elif [ $in_env -eq 1 ]; then
             env_vars="$line"
         elif [ $in_ports -eq 1 ]; then
             ports="$line"
-        elif [[ "$line" == CONTAINER_STATUS=* ]]; then
-            container_status="${line#CONTAINER_STATUS=}"
         fi
     done < "$containers_file"
     
