@@ -1645,7 +1645,7 @@ fix_docker() {
         exit 1
     fi
 
-    REGISTRY_URLS=('https://hub.rat.dev' 'https://docker.1ms.run' 'https://dockerhub.anzu.vip' 'https://freeno.xyz' 'https://dk.nastool.de' 'https://docker.fxxk.dedyn.io')
+    REGISTRY_URLS=('https://docker.gbox.us.kg' 'https://hub.rat.dev' 'https://docker.1ms.run' 'https://dockerhub.anzu.vip' 'https://freeno.xyz' 'https://dk.nastool.de' 'https://docker.fxxk.dedyn.io')
 
     DOCKER_CONFIG_FILE=''
     BACKUP_FILE=''
@@ -1984,6 +1984,7 @@ choose_mirrors() {
     [ -z "${config_dir}" ] && get_config_path check_docker
     mirrors=(
         "docker.io"
+        "docker.gbox.us.kg"
         "hub.rat.dev"
         "docker.1ms.run"
         "dk.nastool.de"
