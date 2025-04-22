@@ -539,12 +539,31 @@ update_ailg() {
     local containers_info_file=""
     local containers_count=0
     
+    # 添加容器ID数组，避免重复处理同一个容器
+    local processed_containers=()
+    
     # 检查是否有jq命令
     if command -v jq &> /dev/null; then
         containers_info_file="/tmp/containers_${update_img//[:\/]/_}.json"
         INFO "检查是否有容器依赖镜像 ${update_img}..."
         # 查找使用此镜像的容器
         for container_id in $(docker ps -a --filter "ancestor=${update_img}" --format "{{.ID}}"); do
+            # 检查该容器ID是否已经处理过
+            local already_processed=0
+            for processed_id in "${processed_containers[@]}"; do
+                if [[ "$processed_id" == "$container_id" ]]; then
+                    already_processed=1
+                    break
+                fi
+            done
+            
+            # 如果已处理过，则跳过
+            if [[ $already_processed -eq 1 ]]; then
+                continue
+            fi
+            
+            # 添加到已处理数组
+            processed_containers+=("$container_id")
             containers_count=$((containers_count + 1))
             
             # 获取容器详细信息并保存
@@ -562,6 +581,22 @@ update_ailg() {
         INFO "检查是否有容器依赖镜像 ${update_img}..."
         # 查找使用此镜像的容器
         for container_id in $(docker ps -a --filter "ancestor=${update_img}" --format "{{.ID}}"); do
+            # 检查该容器ID是否已经处理过
+            local already_processed=0
+            for processed_id in "${processed_containers[@]}"; do
+                if [[ "$processed_id" == "$container_id" ]]; then
+                    already_processed=1
+                    break
+                fi
+            done
+            
+            # 如果已处理过，则跳过
+            if [[ $already_processed -eq 1 ]]; then
+                continue
+            fi
+            
+            # 添加到已处理数组
+            processed_containers+=("$container_id")
             containers_count=$((containers_count + 1))
             
             # 获取容器名称
