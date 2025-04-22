@@ -1614,7 +1614,8 @@ function add_player() {
         clear
         logo
         echo -e "\n"
-        echo -e "\033[1;32m请输入您要添加第三方播放器的Docker容器名称(注意不是Docker镜像名)：\033[0m"
+        echo -e "\033[1;32m请输入您要添加第三方播放器的Docker容器名称！\033[0m"
+        WARN "注意：是容器名，不是Docker镜像名！比如：小雅Emby的镜像名是—— emby/embyserver:latest ，容器名是—— emby"
         read -erp "请输入：" container_name
         if [ -z "$container_name" ]; then
             ERROR "未输入容器名称，请重新输入！"
@@ -1623,6 +1624,8 @@ function add_player() {
         if ! docker ps | grep -q "$container_name"; then
             ERROR "未找到容器，请重新输入！"
             continue
+        else
+            break
         fi
     done
         
