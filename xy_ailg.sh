@@ -1612,9 +1612,9 @@ function docker_image_download() {
 function add_player() {
     while :; do
         clear
-        echo -e "———————————————————————————————————— \033[1;33mA  I  老  G\033[0m —————————————————————————————————"
+        logo
         echo -e "\n"
-        echo -e "\033[1;32m请输入您要添加第三方播放器的容器名称：\033[0m"
+        echo -e "\033[1;32m请输入您要添加第三方播放器的Docker容器名称(注意不是Docker镜像名)：\033[0m"
         read -erp "请输入：" container_name
         if [ -z "$container_name" ]; then
             ERROR "未输入容器名称，请重新输入！"
@@ -2281,13 +2281,7 @@ temp_gbox() {
     [ $? -eq 0 ] && INFO "G-Box容器用临时镜像成功安装/更新，但下次重启仍会更新标准版镜像，可关闭重启自动更新功能，确认网络可正常更新后再打开！" || ERROR "G-Box容器安装/更新失败，程序退出！"
 }
 
-main_menu() {
-    clear
-    st_gbox=$(setup_status "$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)")
-    st_jf=$(setup_status "$(docker ps -a --format '{{.Names}}' | grep 'jellyfin_xy')")
-    st_emby=$(setup_status "$(docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' emby |
-        grep -qE "/xiaoya$ /media\b|\.img /media\.img" && echo 'emby')")
-
+logo() {
     cat << 'LOGO' | echo -e "$(cat -)"
 
 \033[1;32m—————————————————————————————————— \033[1;31mA I \033[1;33m老 \033[1;36mG \033[1;32m———————————————————————————————————————\033[0m
@@ -2306,6 +2300,16 @@ main_menu() {
 # 作者很菜，无法经常更新，不保证适用每个人的环境，请勿用于商业用途；
 # 如果您喜欢这个脚本，可以请我喝咖啡：\033[1;36mhttps://ailg.ggbond.org/3q.jpg\033[0m
 LOGO
+}
+
+main_menu() {
+    clear
+    st_gbox=$(setup_status "$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)")
+    st_jf=$(setup_status "$(docker ps -a --format '{{.Names}}' | grep 'jellyfin_xy')")
+    st_emby=$(setup_status "$(docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' emby |
+        grep -qE "/xiaoya$ /media\b|\.img /media\.img" && echo 'emby')")
+
+    logo
     echo -e "————————————————————————————————— \033[1;33m安  装  状  态\033[0m ——————————————————————————————————"
     echo -e "\e[33m\n\
 G-Box：${st_gbox}      \e[33m小雅姐夫（Jellyfin）：${st_jf}      \e[33m小雅Emby：${st_emby}\n\
