@@ -209,10 +209,10 @@ select_share_resources() {
                 else
                     WARN "下载${share_descriptions[$i]}失败，获取到无效文件"
                     # 删除无效文件
-                    rm -f "$config_dir/$file_name"
+                    [ -f "$config_dir/$file_name" ] && rm -f "$config_dir/$file_name" &>/dev/null
                 fi
             else
-                rm -f "$config_dir/$file_name"
+                [ -f "$config_dir/$file_name" ] && rm -f "$config_dir/$file_name" &>/dev/null
             fi
         done
     }

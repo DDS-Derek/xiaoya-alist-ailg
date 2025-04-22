@@ -1482,8 +1482,10 @@ user_selecto() {
         echo -e "\n"
         echo -e "\033[1;32m8、G-Box安装常用镜像下载（暂不可用，新方案测试中）\033[0m\033[0m"
         echo -e "\n"
+        # echo -e "\033[1;32m9、Emby/Jellyfin添加第三方播放器（适用Docker版）\033[0m\033[0m"
+        # echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
-        read -erp "请输入您的选择（1-8，按b返回上级菜单或按q退出）：" fo_select
+        read -erp "请输入您的选择（1-9，按b返回上级菜单或按q退出）：" fo_select
         case "$fo_select" in
         1) ailg_uninstall emby; break ;;
         2) happy_emby; break ;;
@@ -1493,6 +1495,7 @@ user_selecto() {
         6) expand_img; break ;;
         7) fix_docker; break ;;
         8) docker_image_download; break ;;
+        # 9) add_player; break ;;
         [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
@@ -1604,6 +1607,71 @@ function docker_image_download() {
         ERROR "镜像文件下载失败！"
         return 1
     fi
+}
+
+function add_player() {
+    while :; do
+        clear
+        echo -e "———————————————————————————————————— \033[1;33mA  I  老  G\033[0m —————————————————————————————————"
+        echo -e "\n"
+        echo -e "\033[1;32m请输入您要添加第三方播放器的容器名称：\033[0m"
+        read -erp "请输入：" container_name
+        if [ -z "$container_name" ]; then
+            ERROR "未输入容器名称，请重新输入！"
+            continue
+        fi
+        if ! docker ps | grep -q "$container_name"; then
+            ERROR "未找到容器，请重新输入！"
+            continue
+        fi
+    done
+        
+    WARN "如果您的Emby/Jellyfin容器已安装第三方播放器，请勿重复安装，继续请按y，按任意键返回主菜单！"
+    read -erp "请输入：" add_player_choice
+    if [[ "$add_player_choice" != [Yy] ]]; then
+        main_menu
+        return 0
+    fi
+    isEmby=$(docker inspect "$container_name" --format '{{.Config.Image}}' | grep -q "emby" && echo "true" || echo "false")
+    if [ "$isEmby" == "true" ]; then
+        INDEX_FILE=$(docker exec "$container_name" sh -c "find /system /app /opt -name index.html 2>/dev/null")
+    else
+        INDEX_FILE=$(docker exec "$container_name" sh -c 'echo $JELLYFIN_WEB_DIR')
+        if [ -z "$INDEX_FILE" ]; then
+            INDEX_FILE=$(docker exec "$container_name" sh -c "find /jellyfin -name index.html 2>/dev/null")
+        fi
+    fi
+    
+    if [ -z "$INDEX_FILE" ]; then
+        ERROR "未在您的容器中找到index.html路径，操作取消"
+        return 1
+    fi
+    
+    INDEX_DIR=$(dirname "$INDEX_FILE")
+
+    for i in {1..3}; do
+        curl -sSLf https://ailg.ggbond.org/externalPlayer.js -o "/tmp/externalPlayer.js"
+        if [ -f "/tmp/externalPlayer.js" ]; then
+            if grep -q "embyPot" "/tmp/externalPlayer.js"; then
+                break
+            fi 
+        fi
+    done
+    
+    if [ -f "/tmp/externalPlayer.js" ]; then
+        if grep -q "embyPot" "/tmp/externalPlayer.js"; then
+            docker cp "/tmp/externalPlayer.js" "$container_name":"$INDEX_DIR"
+            docker exec "$container_name" sh -c "cp \"$INDEX_FILE\" \"${INDEX_FILE}.bak\""
+            INFO "备份文件：${INDEX_FILE}.bak"
+            docker exec "$container_name" sh -c "sed -i 's|</body>|<script src=\"externalPlayer.js\" defer></script></body>|g' \"$INDEX_FILE\""
+            INFO "第三方播放器添加成功！"
+        else
+            ERROR "文件下载失败，第三方播放器添加失败！"
+        fi
+    fi
+    
+    read -n 1 -rp "按任意键返回主菜单"
+    main_menu
 }
 
 fix_docker() {
@@ -2284,9 +2352,11 @@ case $1 in
         fuck_docker
         [ -z "$2" ] && temp_gbox || temp_gbox $2
         ;;
+    "3player")
+        add_player
+        ;;
     *)
         fuck_docker
         main_menu
         ;;
 esac
-

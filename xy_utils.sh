@@ -792,6 +792,7 @@ restore_containers() {
         # [ -n "$entrypoint" ] && run_cmd="$run_cmd --entrypoint=\"$entrypoint\""
         # [ -n "$cmd" ] && run_cmd="$run_cmd $cmd"
         
+        container_status=$(echo "$container_json" | jq -r '.State.Status')
         # 执行命令
         INFO "恢复容器 $name..."
         if eval "$run_cmd"; then
