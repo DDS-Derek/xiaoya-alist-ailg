@@ -1630,8 +1630,11 @@ function add_player() {
     done
         
     WARN "如果您的Emby/Jellyfin容器已安装第三方播放器，请勿重复安装，继续请按y，按任意键返回主菜单！"
+    WARN "如果您用此脚本安装过需要恢复原样，请按 r或R"
     read -erp "请输入：" add_player_choice
-    if [[ "$add_player_choice" != [Yy] ]]; then
+    if [[ "$add_player_choice" == [Rr] ]]; then
+        restore_player=1
+    elif [[ "$add_player_choice" != [Yy] ]]; then
         main_menu
         return 0
     fi
@@ -1639,7 +1642,7 @@ function add_player() {
     if [ "$isEmby" == "true" ]; then
         INDEX_FILE=$(docker exec "$container_name" sh -c "find /system /app /opt -name index.html 2>/dev/null")
     else
-        INDEX_FILE=$(docker exec "$container_name" sh -c 'echo $JELLYFIN_WEB_DIR')
+        INDEX_FILE=$(docker exec "$container_name" sh -c 'echo $JELLYFIN_WEB_DIR')/index.html
         if [ -z "$INDEX_FILE" ]; then
             INDEX_FILE=$(docker exec "$container_name" sh -c "find /jellyfin -name index.html 2>/dev/null")
         fi
@@ -1652,6 +1655,16 @@ function add_player() {
     
     INDEX_DIR=$(dirname "$INDEX_FILE")
 
+    if [ "$restore_player" == "1" ]; then
+        if [ -f "${INDEX_FILE}.bak" ]; then
+            docker exec "$container_name" sh -c "cp -f \"${INDEX_FILE}.bak\" \"$INDEX_FILE\"" >/dev/null 2>&1
+        else
+            docker exec "$container_name" bash -c "sed -i 's|<script src=\"externalPlayer.js\" defer></script>||g' $INDEX_FILE"
+        fi
+        [ $? -eq 0 ] && INFO "恢复成功！" || ERROR "恢复失败！您可能要重新安装${container_name}容器！"
+        return 0
+    fi
+
     for i in {1..3}; do
         curl -sSLf https://ailg.ggbond.org/externalPlayer.js -o "/tmp/externalPlayer.js"
         if [ -f "/tmp/externalPlayer.js" ]; then
@@ -1663,7 +1676,7 @@ function add_player() {
     
     if [ -f "/tmp/externalPlayer.js" ]; then
         if grep -q "embyPot" "/tmp/externalPlayer.js"; then
-            docker cp "/tmp/externalPlayer.js" "$container_name":"$INDEX_DIR"
+            docker cp "/tmp/externalPlayer.js" "$container_name":"$INDEX_DIR/externalPlayer.js"
             docker exec "$container_name" sh -c "cp \"$INDEX_FILE\" \"${INDEX_FILE}.bak\""
             INFO "备份文件：${INDEX_FILE}.bak"
             docker exec "$container_name" sh -c "sed -i 's|</body>|<script src=\"externalPlayer.js\" defer></script></body>|g' \"$INDEX_FILE\""
