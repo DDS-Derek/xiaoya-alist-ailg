@@ -1482,8 +1482,8 @@ user_selecto() {
         echo -e "\n"
         echo -e "\033[1;32m8、G-Box安装常用镜像下载（暂不可用，新方案测试中）\033[0m\033[0m"
         echo -e "\n"
-        # echo -e "\033[1;32m9、Emby/Jellyfin添加第三方播放器（适用Docker版）\033[0m\033[0m"
-        # echo -e "\n"
+        echo -e "\033[1;32m9、Emby/Jellyfin添加第三方播放器（适用Docker版）\033[0m\033[0m"
+        echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
         read -erp "请输入您的选择（1-9，按b返回上级菜单或按q退出）：" fo_select
         case "$fo_select" in
@@ -1495,7 +1495,7 @@ user_selecto() {
         6) expand_img; break ;;
         7) fix_docker; break ;;
         8) docker_image_download; break ;;
-        # 9) add_player; break ;;
+        9) add_player; break ;;
         [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
