@@ -1071,6 +1071,10 @@ get_img_path() {
     case "${img_name}" in
     "emby-ailg-115.img" | "emby-ailg-lite-115.img" | "jellyfin-ailg.img" | "jellyfin-ailg-lite.img" | "jellyfin-10.9.6-ailg-lite.img" | "jellyfin-10.9.6-ailg.img") ;;
     "emby-ailg-115-4.9.img" | "emby-ailg-lite-115-4.9.img") ;;
+    "emby-ailg-115.mp4" | "emby-ailg-lite-115.mp4" | "jellyfin-ailg.mp4" | "jellyfin-ailg-lite.mp4" | "jellyfin-10.9.6-ailg-lite.mp4" | "jellyfin-10.9.6-ailg.mp4") ;;
+    "emby-ailg-115-4.9.mp4" | "emby-ailg-lite-115-4.9.mp4")
+        img_path="${img_path%.mp4}.img"
+        ;;
     *)
         ERROR "您输入的不是老G的镜像，或已改名，确保文件名正确后重新运行脚本！"
         exit 1
@@ -1478,8 +1482,10 @@ user_selecto() {
         echo -e "\n"
         echo -e "\033[1;32m8、G-Box安装常用镜像下载（暂不可用，新方案测试中）\033[0m\033[0m"
         echo -e "\n"
+        echo -e "\033[1;32m9、Emby/Jellyfin添加第三方播放器（适用Docker版）\033[0m\033[0m"
+        echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
-        read -erp "请输入您的选择（1-8，按b返回上级菜单或按q退出）：" fo_select
+        read -erp "请输入您的选择（1-9，按b返回上级菜单或按q退出）：" fo_select
         case "$fo_select" in
         1) ailg_uninstall emby; break ;;
         2) happy_emby; break ;;
@@ -1489,6 +1495,7 @@ user_selecto() {
         6) expand_img; break ;;
         7) fix_docker; break ;;
         8) docker_image_download; break ;;
+        9) add_player; break ;;
         [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
@@ -1602,6 +1609,87 @@ function docker_image_download() {
     fi
 }
 
+function add_player() {
+    while :; do
+        clear
+        logo
+        echo -e "\n"
+        echo -e "\033[1;32m请输入您要添加第三方播放器的Docker容器名称！\033[0m"
+        WARN "注意：是容器名，不是Docker镜像名！比如：小雅Emby的镜像名是—— emby/embyserver:latest ，容器名是—— emby"
+        read -erp "请输入：" container_name
+        if [ -z "$container_name" ]; then
+            ERROR "未输入容器名称，请重新输入！"
+            continue
+        fi
+        if ! docker ps | grep -q "$container_name"; then
+            ERROR "未找到容器，请重新输入！"
+            continue
+        else
+            break
+        fi
+    done
+        
+    WARN "如果您的Emby/Jellyfin容器已安装第三方播放器，请勿重复安装，继续请按y，按任意键返回主菜单！"
+    WARN "如果您用此脚本安装过需要恢复原样，请按 r或R"
+    read -erp "请输入：" add_player_choice
+    if [[ "$add_player_choice" == [Rr] ]]; then
+        restore_player=1
+    elif [[ "$add_player_choice" != [Yy] ]]; then
+        main_menu
+        return 0
+    fi
+    isEmby=$(docker inspect "$container_name" --format '{{.Config.Image}}' | grep -q "emby" && echo "true" || echo "false")
+    if [ "$isEmby" == "true" ]; then
+        INDEX_FILE=$(docker exec "$container_name" sh -c "find /system /app /opt -name index.html 2>/dev/null")
+    else
+        INDEX_FILE=$(docker exec "$container_name" sh -c 'echo $JELLYFIN_WEB_DIR')/index.html
+        if [ -z "$INDEX_FILE" ]; then
+            INDEX_FILE=$(docker exec "$container_name" sh -c "find /jellyfin -name index.html 2>/dev/null")
+        fi
+    fi
+    
+    if [ -z "$INDEX_FILE" ]; then
+        ERROR "未在您的容器中找到index.html路径，操作取消"
+        return 1
+    fi
+    
+    INDEX_DIR=$(dirname "$INDEX_FILE")
+
+    if [ "$restore_player" == "1" ]; then
+        if [ -f "${INDEX_FILE}.bak" ]; then
+            docker exec "$container_name" sh -c "cp -f \"${INDEX_FILE}.bak\" \"$INDEX_FILE\"" >/dev/null 2>&1
+        else
+            docker exec "$container_name" sh -c "sed -i 's|<script src=\"externalPlayer.js\" defer></script>||g' $INDEX_FILE"
+        fi
+        [ $? -eq 0 ] && INFO "恢复成功！" || ERROR "恢复失败！您可能要重新安装${container_name}容器！"
+        return 0
+    fi
+
+    for i in {1..3}; do
+        curl -sSLf https://ailg.ggbond.org/externalPlayer.js -o "/tmp/externalPlayer.js"
+        if [ -f "/tmp/externalPlayer.js" ]; then
+            if grep -q "embyPot" "/tmp/externalPlayer.js"; then
+                break
+            fi 
+        fi
+    done
+    
+    if [ -f "/tmp/externalPlayer.js" ]; then
+        if grep -q "embyPot" "/tmp/externalPlayer.js"; then
+            docker cp "/tmp/externalPlayer.js" "$container_name":"$INDEX_DIR/externalPlayer.js"
+            docker exec "$container_name" sh -c "cp \"$INDEX_FILE\" \"${INDEX_FILE}.bak\""
+            INFO "备份文件：${INDEX_FILE}.bak"
+            docker exec "$container_name" sh -c "sed -i 's|</body>|<script src=\"externalPlayer.js\" defer></script></body>|g' \"$INDEX_FILE\""
+            INFO "第三方播放器添加成功！"
+        else
+            ERROR "文件下载失败，第三方播放器添加失败！"
+        fi
+    fi
+    
+    read -n 1 -rp "按任意键返回主菜单"
+    main_menu
+}
+
 fix_docker() {
     docker_pid() {
         if [ -f /var/run/docker.pid ]; then
@@ -1641,7 +1729,7 @@ fix_docker() {
         exit 1
     fi
 
-    REGISTRY_URLS=('https://hub.rat.dev' 'https://docker.1ms.run' 'https://dockerhub.anzu.vip' 'https://freeno.xyz' 'https://dk.nastool.de' 'https://docker.fxxk.dedyn.io')
+    REGISTRY_URLS=('https://docker.gbox.us.kg' 'https://hub.rat.dev' 'https://docker.1ms.run' 'https://dockerhub.anzu.vip' 'https://freeno.xyz' 'https://dk.nastool.de' 'https://docker.fxxk.dedyn.io')
 
     DOCKER_CONFIG_FILE=''
     BACKUP_FILE=''
@@ -1980,6 +2068,7 @@ choose_mirrors() {
     [ -z "${config_dir}" ] && get_config_path check_docker
     mirrors=(
         "docker.io"
+        "docker.gbox.us.kg"
         "hub.rat.dev"
         "docker.1ms.run"
         "dk.nastool.de"
@@ -2146,14 +2235,22 @@ temp_gbox() {
 
     # 获取GB版本号并提取日期值作为tag
     local gb_version=""
-    for i in {1..3}; do
-        gb_version=$(curl -sSLf https://ailg.ggbond.org/GB_version)
+    if [ -n "$1 " ]; then
+        gb_version_tag="$1"
+        if ! [[ "${gb_version_tag}" =~ ^([0-9]{6})$ ]]; then
+            ERROR "输入的GB版本号格式不正确，请输入正确的GB版本号！"
+            exit 1
+        fi  
+    else
+        for i in {1..3}; do
+            gb_version=$(curl -sSLf https://ailg.ggbond.org/GB_version)
         if [[ "${gb_version}" =~ ^GB\.([0-9]{6})\.[0-9]{4}$ ]]; then
             gb_version_tag="${BASH_REMATCH[1]}"
             break
         fi
-        sleep 1
-    done
+            sleep 1
+        done
+    fi
 
     if [ -z "$gb_version_tag" ]; then
         ERROR "无法获取有效的GB版本号，程序退出！"
@@ -2200,13 +2297,7 @@ temp_gbox() {
     [ $? -eq 0 ] && INFO "G-Box容器用临时镜像成功安装/更新，但下次重启仍会更新标准版镜像，可关闭重启自动更新功能，确认网络可正常更新后再打开！" || ERROR "G-Box容器安装/更新失败，程序退出！"
 }
 
-main_menu() {
-    clear
-    st_gbox=$(setup_status "$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)")
-    st_jf=$(setup_status "$(docker ps -a --format '{{.Names}}' | grep 'jellyfin_xy')")
-    st_emby=$(setup_status "$(docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' emby |
-        grep -qE "/xiaoya$ /media\b|\.img /media\.img" && echo 'emby')")
-
+logo() {
     cat << 'LOGO' | echo -e "$(cat -)"
 
 \033[1;32m—————————————————————————————————— \033[1;31mA I \033[1;33m老 \033[1;36mG \033[1;32m———————————————————————————————————————\033[0m
@@ -2225,6 +2316,16 @@ main_menu() {
 # 作者很菜，无法经常更新，不保证适用每个人的环境，请勿用于商业用途；
 # 如果您喜欢这个脚本，可以请我喝咖啡：\033[1;36mhttps://ailg.ggbond.org/3q.jpg\033[0m
 LOGO
+}
+
+main_menu() {
+    clear
+    st_gbox=$(setup_status "$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)")
+    st_jf=$(setup_status "$(docker ps -a --format '{{.Names}}' | grep 'jellyfin_xy')")
+    st_emby=$(setup_status "$(docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' emby |
+        grep -qE "/xiaoya$ /media\b|\.img /media\.img" && echo 'emby')")
+
+    logo
     echo -e "————————————————————————————————— \033[1;33m安  装  状  态\033[0m ——————————————————————————————————"
     echo -e "\e[33m\n\
 G-Box：${st_gbox}      \e[33m小雅姐夫（Jellyfin）：${st_jf}      \e[33m小雅Emby：${st_emby}\n\
@@ -2269,11 +2370,13 @@ case $1 in
         ;;
     "temp-gbox")
         fuck_docker
-        temp_gbox
+        [ -z "$2" ] && temp_gbox || temp_gbox $2
+        ;;
+    "3player")
+        add_player
         ;;
     *)
         fuck_docker
         main_menu
         ;;
 esac
-
