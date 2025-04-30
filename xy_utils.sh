@@ -539,12 +539,31 @@ update_ailg() {
     local containers_info_file=""
     local containers_count=0
     
+    # 添加容器ID数组，避免重复处理同一个容器
+    local processed_containers=()
+    
     # 检查是否有jq命令
     if command -v jq &> /dev/null; then
         containers_info_file="/tmp/containers_${update_img//[:\/]/_}.json"
         INFO "检查是否有容器依赖镜像 ${update_img}..."
         # 查找使用此镜像的容器
         for container_id in $(docker ps -a --filter "ancestor=${update_img}" --format "{{.ID}}"); do
+            # 检查该容器ID是否已经处理过
+            local already_processed=0
+            for processed_id in "${processed_containers[@]}"; do
+                if [[ "$processed_id" == "$container_id" ]]; then
+                    already_processed=1
+                    break
+                fi
+            done
+            
+            # 如果已处理过，则跳过
+            if [[ $already_processed -eq 1 ]]; then
+                continue
+            fi
+            
+            # 添加到已处理数组
+            processed_containers+=("$container_id")
             containers_count=$((containers_count + 1))
             
             # 获取容器详细信息并保存
@@ -562,6 +581,22 @@ update_ailg() {
         INFO "检查是否有容器依赖镜像 ${update_img}..."
         # 查找使用此镜像的容器
         for container_id in $(docker ps -a --filter "ancestor=${update_img}" --format "{{.ID}}"); do
+            # 检查该容器ID是否已经处理过
+            local already_processed=0
+            for processed_id in "${processed_containers[@]}"; do
+                if [[ "$processed_id" == "$container_id" ]]; then
+                    already_processed=1
+                    break
+                fi
+            done
+            
+            # 如果已处理过，则跳过
+            if [[ $already_processed -eq 1 ]]; then
+                continue
+            fi
+            
+            # 添加到已处理数组
+            processed_containers+=("$container_id")
             containers_count=$((containers_count + 1))
             
             # 获取容器名称
@@ -695,6 +730,15 @@ update_ailg() {
     else
         INFO "${update_img} 镜像已是最新版本，无需更新！"
         docker rmi "${update_img}_old" > /dev/null 2>&1
+        # 恢复容器
+        if [ $containers_count -gt 0 ] && [ -f "$containers_info_file" ]; then
+            # 检查是否有jq命令
+            if command -v jq &> /dev/null && [[ "$containers_info_file" == *".json" ]]; then
+                restore_containers "$containers_info_file" "${update_img}"
+            else
+                restore_containers_simple "$containers_info_file" "${update_img}"
+            fi
+        fi
         return 0
     fi
 }
@@ -783,6 +827,7 @@ restore_containers() {
         # [ -n "$entrypoint" ] && run_cmd="$run_cmd --entrypoint=\"$entrypoint\""
         # [ -n "$cmd" ] && run_cmd="$run_cmd $cmd"
         
+        container_status=$(echo "$container_json" | jq -r '.State.Status')
         # 执行命令
         INFO "恢复容器 $name..."
         if eval "$run_cmd"; then
@@ -868,6 +913,8 @@ restore_containers_simple() {
             in_ports=1
         elif [[ "$line" == "PORTS_END" ]]; then
             in_ports=0
+        elif [[ "$line" == CONTAINER_STATUS=* ]]; then
+            container_status="${line#CONTAINER_STATUS=}"
         elif [[ "$line" == "CONTAINER_END" ]]; then
             # 恢复容器
             restore_single_container
@@ -879,14 +926,13 @@ restore_containers_simple() {
             mounts=""
             env_vars=""
             ports=""
+            container_status=""
         elif [ $in_mounts -eq 1 ]; then
             mounts="$line"
         elif [ $in_env -eq 1 ]; then
             env_vars="$line"
         elif [ $in_ports -eq 1 ]; then
             ports="$line"
-        elif [[ "$line" == CONTAINER_STATUS=* ]]; then
-            container_status="${line#CONTAINER_STATUS=}"
         fi
     done < "$containers_file"
     
