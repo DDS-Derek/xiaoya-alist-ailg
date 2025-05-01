@@ -3,6 +3,7 @@
 # shellcheck disable=SC2086
 
 source /tmp/xy_utils.sh
+source /tmp/xy_sync.sh
 
 PATH=${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
@@ -1467,22 +1468,15 @@ user_selecto() {
         echo -e "———————————————————————————————————— \033[1;33mA  I  老  G\033[0m —————————————————————————————————"
         echo -e "\n"
         echo -e "\033[1;32m1、卸载全在这\033[0m"
-        echo -e "\n"
         echo -e "\033[1;32m2、更换开心版小雅EMBY\033[0m"
-        echo -e "\n"
         echo -e "\033[1;32m3、挂载老G速装版镜像\033[0m"
-        echo -e "\n"
         echo -e "\033[1;32m4、老G速装版镜像重装/同步config\033[0m"
-        echo -e "\n"
         echo -e "\033[1;32m5、G-box自动更新/取消自动更新\033[0m"
-        echo -e "\n"
         echo -e "\033[1;32m6、速装emby/jellyfin镜像扩容\033[0m"
-        echo -e "\n"
         echo -e "\033[1;32m7、修复docker镜像无法拉取（可手动配置镜像代理）\033[0m\033[0m"
-        echo -e "\n"
         echo -e "\033[1;32m8、G-Box安装常用镜像下载（暂不可用，新方案测试中）\033[0m\033[0m"
-        echo -e "\n"
         echo -e "\033[1;32m9、Emby/Jellyfin添加第三方播放器（适用Docker版）\033[0m\033[0m"
+        echo -e "\033[1;32m10、安装/配置小雅Emby爬虫同步（G-Box专用版）\033[0m\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
         read -erp "请输入您的选择（1-9，按b返回上级菜单或按q退出）：" fo_select
@@ -1496,6 +1490,7 @@ user_selecto() {
         7) fix_docker; break ;;
         8) docker_image_download; break ;;
         9) add_player; break ;;
+        # 10) xy_emby_sync; break ;;
         [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
@@ -2374,6 +2369,9 @@ case $1 in
         ;;
     "3player")
         add_player
+        ;;
+    "xy-sync")
+        xy_emby_sync
         ;;
     *)
         fuck_docker

@@ -104,6 +104,7 @@ BASE_URLS=(
 SCRIPT_FILES=(
     "xy_ailg.sh"
     "xy_utils.sh"
+    "xy_sync.sh"
 )
 
 # 下载脚本
@@ -155,14 +156,16 @@ for file in "${SCRIPT_FILES[@]}"; do
         case "$file" in
             "xy_ailg.sh") download_success=1 ;;
             "xy_utils.sh") utils_success=1 ;;
+            "xy_sync.sh") sync_success=1 ;;
         esac
     fi
 done
 
-if [ $download_success -eq 1 ] && [ $utils_success -eq 1 ]; then
+if [ $download_success -eq 1 ] && [ $utils_success -eq 1 ] && [ $sync_success -eq 1 ]; then
     # 添加执行权限
     chmod +x /tmp/xy_ailg.sh
     chmod +x /tmp/xy_utils.sh
+    chmod +x /tmp/xy_sync.sh
     
     # 执行主脚本
     INFO "初始化完成..."
@@ -172,5 +175,6 @@ else
     ERROR "脚本下载失败,请检查网络连接后重试!"
     [ $download_success -eq 0 ] && ERROR "主脚本下载失败"
     [ $utils_success -eq 0 ] && ERROR "工具脚本下载失败"
+    [ $sync_success -eq 0 ] && ERROR "同步脚本下载失败"
     exit 1
 fi 
