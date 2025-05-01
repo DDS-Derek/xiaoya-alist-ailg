@@ -1490,7 +1490,7 @@ user_selecto() {
         7) fix_docker; break ;;
         8) docker_image_download; break ;;
         9) add_player; break ;;
-        # 10) xy_emby_sync; break ;;
+        10) xy_emby_sync; break ;;
         [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
