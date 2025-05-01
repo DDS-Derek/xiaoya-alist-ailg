@@ -110,6 +110,7 @@ SCRIPT_FILES=(
 # 下载脚本
 utils_success=0
 download_success=0
+sync_success=0
 
 download_file() {
     local file=$1
