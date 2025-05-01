@@ -139,6 +139,12 @@ download_file() {
                             break
                         fi
                         ;;
+                    "xy_sync.sh")
+                        if grep -q "xy_emby_sync" "/tmp/${file}"; then
+                            success=0
+                            break
+                        fi
+                        ;;
                 esac
             fi
             [ $success -eq 1 ] && rm -f "/tmp/${file}"
