@@ -533,7 +533,8 @@ function user_emby_fast() {
         down_path="emby"
         [[ "${f4_select}" == [34] ]] && get_emby_image 4.9.0.38 || get_emby_image
         init="run"
-        emd_name="xiaoya-emd"
+        # emd_name="xiaoya-emd"
+        emd_name="xy-emd"
         entrypoint_mount="entrypoint_emd"
         check_port "emby"
     elif [[ "${f4_select}" == [5678] ]]; then
@@ -550,6 +551,7 @@ function user_emby_fast() {
     get_emby_status
 
     docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
+    docker ps -a | grep 'ailg/xy-emd' | awk '{print $1}' | xargs -r docker stop
     if [ ${#emby_list[@]} -ne 0 ]; then
         for entry in "${emby_list[@]}"; do
             op_emby=${entry%%:*} 
@@ -705,28 +707,17 @@ function user_emby_fast() {
 
     if [[ ! $answer =~ ^[Nn]$ || -z "$answer" ]]; then
         INFO "正在为您安装小雅元数据爬虫同步……"
+        docker rm -f xiaoya-emd &> /dev/null
         docker stop ${emd_name} &> /dev/null
-        if update_ailg "ddsderek/xiaoya-emd:latest"; then
-            if ! docker cp "${docker_name}":/var/lib/"${entrypoint_mount}" "$image_dir/entrypoint.sh"; then
-                if ! curl -o "$image_dir/entrypoint.sh" https://ailg.ggbond.org/${entrypoint_mount}; then
-                    ERROR "获取文件失败，请将G-Box更新到最新版或检查网络后重试！" && exit 1
-                fi
-            fi
-            chmod 777 "$image_dir/entrypoint.sh"
-            if docker run -d \
-                --name="${emd_name}" \
-                --privileged \
-                --restart=always \
-                --net=host \
-                -e IMG_VOLUME=true \
-                -v "$image_dir/entrypoint.sh":/entrypoint.sh \
-                ddsderek/xiaoya-emd:latest; then
+        if update_ailg "ailg/xy-emd:latest"; then
+            xy_emby_sync
+            if [ $? -eq 0 ]; then
                 INFO "小雅元数据同步爬虫安装成功！"
             else
-                INFO "小雅元数据同步爬虫安装失败，请手动安装！"
+                INFO "小雅元数据同步爬虫安装失败，请重装安装！"
             fi
         else
-            ERROR "ddsderek/xiaoya-emd:latest镜像更新失败，请检查网络后手动安装！" && exit 1
+            ERROR "ailg/xy-emd:latest镜像更新失败，请检查网络后手动安装！" && exit 1
         fi
     else
         INFO "安装完成，您选择不安装小雅爬虫同步！"
