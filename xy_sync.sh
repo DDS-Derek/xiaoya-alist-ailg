@@ -411,7 +411,7 @@ function xy_emby_sync() {
     output_string=${output_string%,}
 
     docker_emd_name="$(docker ps -a | grep -E 'ailg/xy-emd' | awk '{print $NF}' | head -n1)"
-    docker rm -f ${docker_emd_name}
+    [ -n "${docker_emd_name}" ] && docker rm -f ${docker_emd_name}
     if docker_pull ailg/xy-emd:latest; then
         docker run -d --name xy-emd -e CYCLE="${sync_interval_input}" \
             -v "${mount_path}:/media.img" --privileged --net=host \
