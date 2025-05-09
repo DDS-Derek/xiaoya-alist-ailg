@@ -21,8 +21,9 @@ function xy_emby_sync() {
         "纪录片（已刮削）/"
     )
 
-    # Associative array to hold the selection status (1 for selected, 0 for not)
-    declare -A selected_status
+    # 使用普通数组替代关联数组，通过索引和值的命名约定实现键值存储
+    declare -a status_keys
+    declare -a status_values
 
     # Variables to store user choices for interval and rebuild
     sync_interval=""
@@ -32,29 +33,65 @@ function xy_emby_sync() {
 
     # --- Functions ---
 
-    # Initialize selection status
-    initialize_status() {
-        for dir in "${DIRS[@]}"; do
-            selected_status["$dir"]=0
+    # 查找键在数组中的索引
+    find_key_index() {
+        local search_key="$1"
+        local i=0
+        
+        for key in "${status_keys[@]}"; do
+            if [[ "$key" == "$search_key" ]]; then
+                echo $i
+                return 0
+            fi
+            i=$((i + 1))
         done
-        selected_status["Default"]=0
-        selected_status["All"]=0
-
-        # Set initial state to Default
-        select_default
+        
+        echo -1  # 如果没找到返回-1
+        return 1
     }
 
     # Get selection status for a key (directory name, "Default", or "All")
     get_status() {
         local key="$1"
-        echo "${selected_status[$key]:-0}" # Return 0 if key doesn't exist yet
+        local index=$(find_key_index "$key")
+        
+        if [[ $index -ge 0 ]]; then
+            echo "${status_values[$index]}"
+        else
+            echo "0"  # Return 0 if key doesn't exist yet
+        fi
     }
 
     # Set selection status for a key
     set_status() {
         local key="$1"
         local value="$2"
-        selected_status["$key"]=$value
+        local index=$(find_key_index "$key")
+        
+        if [[ $index -ge 0 ]]; then
+            # 键已存在，更新值
+            status_values[$index]=$value
+        else
+            # 键不存在，添加新键值对
+            status_keys+=("$key")
+            status_values+=("$value")
+        fi
+    }
+
+    # Initialize selection status
+    initialize_status() {
+        # 初始化数组
+        status_keys=()
+        status_values=()
+        
+        for dir in "${DIRS[@]}"; do
+            set_status "$dir" 0
+        done
+        set_status "Default" 0
+        set_status "All" 0
+
+        # Set initial state to Default
+        select_default
     }
 
     # Select only the default directories
@@ -88,7 +125,6 @@ function xy_emby_sync() {
         set_status "Default" 0
         set_status "All" 0
     }
-
 
     # Update the status of "Default" and "All" based on individual selections
     update_special_statuses() {
@@ -134,7 +170,6 @@ function xy_emby_sync() {
         set_status "All" $all_selected
         set_status "Default" $default_match
     }
-
 
     # Display the selection menu
     show_menu() {

@@ -790,6 +790,7 @@ ailg_uninstall() {
             ;;
         5)
             general_uninstall "ddsderek/xiaoya-emd:latest" "xiaoya-emd"
+            general_uninstall "ailg/xy-emd:latest" "xy-emd"
             break
             ;;
         6)
@@ -1132,7 +1133,7 @@ mount_img() {
                         INFO "${op_emby}容器已关闭！"
                     done
 
-                    docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs docker stop
+                    docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
                     INFO "小雅爬虫容器已关闭！"
 
                     [[ $(basename "${img_path}") == emby*.img ]] && loop_order=/dev/loop7 || loop_order=/dev/loop6
@@ -1277,7 +1278,7 @@ expand_diy_img_path() {
         docker stop "${op_emby}"
         INFO "${op_emby}容器已关闭！"
     done
-    docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs docker stop
+    docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
     INFO "小雅爬虫容器已关闭！"
     [[ $(basename "${img_path}") == emby*.img ]] && loop_order=/dev/loop7 || loop_order=/dev/loop6
     umount "${loop_order}" > /dev/null 2>&1
