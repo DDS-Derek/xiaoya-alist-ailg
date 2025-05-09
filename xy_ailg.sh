@@ -1334,7 +1334,7 @@ sync_config() {
         else
             if [ -s $config_dir/docker_address.txt ]; then
                 docker_address=$(head -n1 $config_dir/docker_address.txt)
-                if curl -siL http://${docker_address}:5678/d/README.md | grep -v 302 | grep "x-oss-"; then
+                if curl -siL ${docker_address}/d/README.md | grep -v 302 | grep "x-oss-"; then
                     xiaoya_addr=${docker_address}
                 else
                     ERROR "请检查xiaoya是否正常运行后再试"
