@@ -1468,6 +1468,7 @@ user_selecto() {
         echo -e "\033[1;32m8、G-Box安装常用镜像下载（暂不可用，新方案测试中）\033[0m\033[0m"
         echo -e "\033[1;32m9、Emby/Jellyfin添加第三方播放器（适用Docker版）\033[0m\033[0m"
         echo -e "\033[1;32m10、安装/配置小雅Emby爬虫同步（G-Box专用版）\033[0m\033[0m"
+        echo -e "\033[1;32m11、一键安装小雅Emby音乐资源\033[0m\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
         read -erp "请输入您的选择（1-9，按b返回上级菜单或按q退出）：" fo_select
@@ -1482,6 +1483,7 @@ user_selecto() {
         8) docker_image_download; break ;;
         9) add_player; break ;;
         10) xy_emby_sync; break ;;
+        11) xy_emby_music; break ;;
         [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
@@ -1494,6 +1496,94 @@ user_selecto() {
     read -n 1 -rp "按任意键返回主菜单"
     main_menu
 }
+
+function xy_emby_music() {
+    if [[ $st_gbox =~ "未安装" ]]; then
+        ERROR "请先安装G-Box，再执行本安装！"
+        main_menu
+        return
+    fi
+    umask 000
+    [ -z "${config_dir}" ] && get_config_path
+    mount_img || exit 1
+    if [ -s $config_dir/docker_address.txt ]; then
+        docker_address=$(head -n1 $config_dir/docker_address.txt)
+        if curl -siL ${docker_address}/d/README.md | grep -v 302 | grep "x-oss-"; then
+            xiaoya_addr=${docker_address}
+        else
+            ERROR "请检查xiaoya是否正常运行后再试"
+            exit 1
+        fi
+    else
+        ERROR "请先配置 $config_dir/docker_address.txt 后重试"
+        exit 1
+    fi
+    
+    for i in {1..3}; do
+        remote_size=$(curl -sL -D - -o /dev/null --max-time 10 "${xiaoya_addr}/d/元数据/music.mp4" | grep "Content-Length" | cut -d' ' -f2 | tail -n 1 | tr -d '\r')
+        [[ -n $remote_size ]] && echo -e "远程music.mp4文件大小：${remote_size}" && break
+    done
+    
+    if [[ -z $remote_size ]]; then
+        ERROR "获取远程文件大小失败，请检查网络后重新运行脚本！"
+        exit 1
+    fi
+    
+    download_success=false
+    for attempt in {1..3}; do
+        INFO "第 ${attempt} 次尝试下载music.mp4文件..."
+        
+        docker run -i \
+            --security-opt seccomp=unconfined \
+            --rm \
+            --net=host \
+            -v ${img_mount}:/media \
+            -v /tmp:/download \
+            --workdir=/download \
+            -e LANG=C.UTF-8 \
+            ailg/ggbond:latest \
+            aria2c -o music.mp4 --continue=true -x6 --conditional-get=true --allow-overwrite=true "${xiaoya_addr}/d/元数据/music.mp4"
+        
+        local_size=$(du -b /tmp/music.mp4 | cut -f1)
+        
+        if [[ -f /tmp/music.mp4.aria2 ]] || [[ $remote_size -ne "$local_size" ]]; then
+            WARN "第 ${attempt} 次下载music.mp4文件不完整，将重新下载！"
+            
+            if [[ $attempt -eq 3 ]]; then
+                ERROR "三次尝试后音乐文件依然下载不完整，请检查网络后重新运行脚本！"
+                exit 1
+            fi
+        else
+            INFO "music.mp4文件下载成功，开始解压..."
+            download_success=true
+            break
+        fi
+    done
+    
+    if $download_success; then
+        docker run -i \
+            --security-opt seccomp=unconfined \
+            --rm \
+            --net=host \
+            -v ${img_mount}:/media \
+            -v /tmp:/download \
+            --workdir=/download \
+            -e LANG=C.UTF-8 \
+            ailg/ggbond:latest \
+            bash -c "7z x -aoa -bb1 -mmt=16 /download/music.mp4 -o/media/xiaoya/ && chmod -R 777 /media/xiaoya/Music"
+        
+        if [ $? -eq 0 ]; then
+            INFO "${Green}小雅Emby音乐资源安装成功！${NC}"
+            INFO "音乐文件已解压到${Blue}${img_mount}/xiaoya/Music${NC}目录"
+            INFO "请在Emby/Jellyfin中扫描Music目录完成入库，如没有Music媒体库，请自行添加，媒体库命名为Music，类型选音乐，挂载目录为${Blue}/media/Music${NC}"
+            
+            rm -f /tmp/music.mp4
+        else
+            ERROR "音乐资源解压失败，请检查磁盘空间或重新运行脚本！"
+        fi
+    fi
+}
+
 
 function docker_image_download() {
     echo -e "\033[1;33m使用本功能请确保您已安装G-Box并正在运行，且G-Box中添加了夸克网盘并正常运行，否则将无法下载！\033[0m"
