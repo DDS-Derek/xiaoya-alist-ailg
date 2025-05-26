@@ -2259,12 +2259,16 @@ update_data() {
             for ((i=1; i<=retries; i++)); do
                 if curl -s -O ${url_base}${file}; then
                     INFO "${file}下载成功"
-                    if [[ ${file} == *.zip ]]; then
-                        if [[ $(stat -c%s "${file}") -gt 500000 ]]; then
+                        if [[ ${file} == *.zip ]]; then
+                        filename=$(basename "$file")
+                        threshold=500000
+                        [[ "$filename" == "update.zip" ]] && threshold=50000
+                        
+                        if [[ $(stat -c%s "${file}") -gt $threshold ]]; then
                             success=0
                             break
                         else
-                            WARN "${file}文件大小不足，重试..."
+                            WARN "${file}文件大小不足（要求：$threshold 字节），重试..."
                         fi
                     else    
                         success=0
