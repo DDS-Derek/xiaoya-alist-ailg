@@ -352,9 +352,10 @@ check_space() {
     free_size_G=$((free_size / 1024 / 1024))
     if [ "$free_size_G" -lt "$2" ]; then
         ERROR "空间剩余容量不够：${free_size_G}G 小于最低要求${2}G"
-        exit 1
+        return 1
     else
         INFO "磁盘可用空间：${free_size_G}G"
+        return 0
     fi
 }
 
@@ -1017,6 +1018,301 @@ restore_containers_simple() {
     }
 }
 
+
+xy_media_reunzip() {
+    # Files to process mapping
+    declare -A FILE_TO_DIR_MAP=(
+        ["all.mp4"]="📺画质演示测试（4K，8K，HDR，Dolby） 动漫 每日更新 测试 电影 电视剧 纪录片 纪录片（已刮削） 综艺 音乐"
+        ["115.mp4"]="115"
+        ["pikpak.mp4"]="PikPak"
+        ["json.mp4"]="json"
+        ["短剧.mp4"]="短剧"
+        ["蓝光原盘.mp4"]="ISO"
+        ["config.mp4"]="config"
+        ["music.mp4"]="Music"
+    )
+
+
+    # --- Cleanup Function ---
+    cleanup() {
+        INFO "Attempting cleanup..."
+
+        # Unmount if mounted
+        if [ -n "$img_mount" ] && mount | grep -q " ${img_mount} "; then
+            INFO "Unmounting ${img_mount}..."
+            umount "${img_mount}" || WARN "Failed to unmount ${img_mount}"
+        fi
+        
+        INFO "Cleanup attempt finished."
+    }
+    trap cleanup EXIT SIGHUP SIGINT SIGTERM
+
+    # --- File Processing Functions ---
+    prepare_directories() {
+        # Remove old directories in intermediate_dir based on files to process
+        for file_to_download in "${files_to_process[@]}"; do
+            local dir_names_str="${FILE_TO_DIR_MAP[$file_to_download]}"
+            if [ "$file_to_download" == "config.mp4" ]; then
+                INFO "删除旧的config目录: ${img_mount}/config"
+                rm -rf "${img_mount:?}/config" # Protect against empty vars
+            else
+                # Handle multiple dirs for all.mp4
+                IFS=' ' read -r -a dir_array <<< "$dir_names_str"
+                for dir_name_part in "${dir_array[@]}"; do
+                    if [ -n "$dir_name_part" ]; then # Ensure not empty
+                        INFO "删除旧的数据目录: ${img_mount}/xiaoya/${dir_name_part}"
+                        rm -rf "${img_mount:?}/xiaoya/${dir_name_part:?}"
+                    fi
+                done
+            fi
+        done
+    }
+
+    download_and_extract() {
+        local file_to_download=$1
+        INFO "处理文件: $file_to_download"
+        
+        # 检查文件是否已存在且下载完成
+        local skip_download=false
+        if [ -f "${source_dir}/${file_to_download}" ] && [ ! -f "${source_dir}/${file_to_download}.aria2" ]; then
+            INFO "文件 ${file_to_download} 已存在且下载完成，跳过下载步骤"
+            skip_download=true
+        fi
+
+        if update_ailg ailg/ggbond:latest; then
+            INFO "ailg/ggbond:latest 镜像更新成功！"
+        else
+            ERROR "ailg/ggbond:latest 镜像更新失败，请检查网络后重新运行脚本！"
+            return 1
+        fi
+        
+        if [ "$skip_download" = true ]; then
+            # 直接解压已有文件
+            docker run --rm --net=host \
+                -v "${source_dir}:/source_temp_dir" \
+                -v "${img_mount}:/dist" \
+                ailg/ggbond:latest \
+                bash -c "cd /source_temp_dir && \
+                        echo '正在解压 ${file_to_download}...' && \
+                        if [ \"$file_to_download\" = \"config.mp4\" ]; then \
+                            7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/\" ; \
+                        else \
+                            7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/xiaoya\" ; \
+                        fi"
+        else
+            # 下载并解压文件
+            docker run --rm --net=host \
+                -v "${source_dir}:/source_temp_dir" \
+                -v "${img_mount}:/dist" \
+                ailg/ggbond:latest \
+                bash -c "cd /source_temp_dir && \
+                        echo '正在下载 ${file_to_download}...' && \
+                        aria2c -o \"${file_to_download}\" --auto-file-renaming=false --allow-overwrite=true -c -x6 \"${xiaoya_addr}/d/元数据/${file_to_download}\" && \
+                        echo '正在解压 ${file_to_download}...' && \
+                        if [ \"$file_to_download\" = \"config.mp4\" ]; then \
+                            7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/\" ; \
+                        else \
+                            7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/xiaoya\" ; \
+                        fi"
+        fi
+        
+        if [ $? -eq 0 ]; then
+            INFO "√ $file_to_download 处理成功."
+            return 0
+        else
+            ERROR "× $file_to_download 处理失败."
+            return 1
+        fi
+    }
+
+    get_remote_file_sizes() {
+        local files_to_check=("$@")
+        local total_size_bytes=0
+        
+        for file_to_check in "${files_to_check[@]}"; do
+            INFO "获取远程文件 $file_to_check 的大小..."
+            local remote_file_url="${xiaoya_addr}/d/元数据/${file_to_check}"
+            local remote_size=0
+            local attempts=0
+            local max_attempts=3
+            
+            while [ $attempts -lt $max_attempts ]; do
+                let attempts+=1
+                INFO "尝试 $attempts/$max_attempts 获取 $file_to_check 的远程大小"
+                remote_size=$(curl -sL -D - --max-time 10 "$remote_file_url" | grep -i "Content-Length" | awk '{print $2}' | tr -d '\r' | tail -n1)
+                
+                if [[ "$remote_size" =~ ^[0-9]+$ ]] && [ "$remote_size" -gt 10000000 ]; then
+                    INFO "成功获取 $file_to_check 的远程大小: $remote_size 字节"
+                    break
+                else
+                    WARN "获取 $file_to_check 的远程大小失败 (得到 '$remote_size')，尝试 $attempts/$max_attempts"
+                    if [ $attempts -lt $max_attempts ]; then
+                        sleep 2
+                    fi
+                    remote_size=0
+                fi
+            done
+            if [ "$remote_size" -eq 0 ]; then
+                ERROR "无法获取 $file_to_check 的远程大小"
+                exit 1
+            fi
+            
+            total_size_bytes=$((total_size_bytes + remote_size))
+            if [ -f "${source_dir}/${file_to_check}" ]; then
+                local local_size_bytes=$(stat -c%s "${source_dir}/${file_to_check}")
+                if [ "$remote_size" -ne "$local_size_bytes" ]; then
+                INFO "本地文件 $file_to_check 大小($local_size_bytes 字节)与远程文件大小($remote_size 字节)不一致，需要重新下载"
+                rm -f "${source_dir}/${file_to_check}"
+                fi
+            fi
+        done
+
+        total_size_gb=$((total_size_bytes / 1024 / 1024 / 1024 + 5))
+        INFO "所有选定文件所需总大小为: $total_size_gb GB"
+    }
+
+    # --- Main Function ---
+    media_reunzip_main() {
+        if [[ $st_gbox =~ "未安装" ]]; then
+            ERROR "请先安装G-Box，再执行本安装！"
+            main_menu
+            return
+        fi
+
+        mount_img || exit 1
+        if [ -n "${emby_name}" ]; then
+            if ! docker stop "${emby_name}" > /dev/null 2>&1; then
+                WARN "停止容器 ${emby_name} 失败"
+                exit 1
+            fi
+        fi
+        [ -z "${config_dir}" ] && get_config_path
+
+        if [ -s $config_dir/docker_address.txt ]; then
+            xiaoya_addr=$(head -n1 $config_dir/docker_address.txt)
+        else
+            echo "请先配置 $config_dir/docker_address.txt，以便获取docker 地址"
+            exit
+        fi   
+        # Verify xiaoya address is accessible
+        if ! curl -sIL "${xiaoya_addr}/d/README.md" --max-time 5 | grep -q "200 OK"; then
+            ERROR "无法连接到小雅alist: $xiaoya_addr"
+            exit 1
+        fi
+        
+        docker_addr="$xiaoya_addr"
+        
+        # Ask user to select which files to process
+        echo -e "\n请选择要重新下载和解压的文件:"
+        local file_options=("all.mp4" "115.mp4" "pikpak.mp4" "json.mp4" "短剧.mp4" "蓝光原盘.mp4" "config.mp4" "music.mp4")
+        declare -A selected_files # Store 1 if selected, 0 otherwise
+        
+        # Initialize all as not selected
+        for file_key in "${file_options[@]}"; do 
+            selected_files["$file_key"]=0
+        done
+        
+        while true; do
+            # Display current selection
+            for index in "${!file_options[@]}"; do
+                local file_opt="${file_options[$index]}"
+                local status_char="×"; local color="$Red"
+                if [ "${selected_files[$file_opt]}" -eq 1 ]; then 
+                    status_char="√"; color="$Green"
+                fi
+                printf "[ %-1d ] ${color}[%s] %s${NC}\n" $((index + 1)) "$status_char" "$file_opt"
+            done
+            printf "[ 0 ] 确认并继续\n"
+            
+            local select_num
+            read -erp "请输入序号(0-${#file_options[@]}): " select_num
+            
+            if [[ "$select_num" =~ ^[0-9]+$ ]]; then
+                if [ "$select_num" -eq 0 ]; then
+                    local count_selected=0
+                    for file_key_chk in "${file_options[@]}"; do 
+                        if [ "${selected_files[$file_key_chk]}" -eq 1 ]; then 
+                            let count_selected+=1
+                        fi
+                    done
+                    if [ $count_selected -eq 0 ]; then 
+                        ERROR "至少选择一个文件"
+                    else 
+                        break
+                    fi
+                elif [ "$select_num" -ge 1 ] && [ "$select_num" -le ${#file_options[@]} ]; then
+                    local file_to_toggle="${file_options[$((select_num-1))]}"
+                    selected_files["$file_to_toggle"]=$((1 - selected_files["$file_to_toggle"]))
+                else 
+                    ERROR "无效序号"
+                fi
+            else 
+                ERROR "无效输入"
+            fi
+        done
+        
+        # Create array of files to process
+        files_to_process=()
+        for file_key in "${file_options[@]}"; do
+            if [ "${selected_files[$file_key]}" -eq 1 ]; then
+                files_to_process+=("$file_key")
+            fi
+        done
+        
+        INFO "将处理以下文件: ${files_to_process[*]}"
+        
+        # 获取用户输入的source_dir并检查空间是否足够
+        while true; do
+            read -erp "请输入临时存放下载文件的目录（默认：/tmp/xy_reunzip_source）: " source_dir
+            source_dir=${source_dir:-/tmp/xy_reunzip_source}
+            check_path "$source_dir"
+            
+            # 获取所有选定文件的总大小
+            get_remote_file_sizes "${files_to_process[@]}"
+
+            if check_space "$source_dir" "$total_size_gb"; then
+                break
+            else
+                read -erp "是否选择其他目录? (y/n): " choose_another
+                if [[ ! "$choose_another" =~ ^[Yy]$ ]]; then
+                    ERROR "由于空间不足，脚本终止"
+                    exit 1
+                fi
+            fi
+        done
+
+        # Prepare directories for processing
+        prepare_directories
+        
+        # 解压后的文件通常比原始文件大1.5倍
+        required_intermediate_gb=$(awk "BEGIN {printf \"%.0f\", $total_size_gb * 1.5}")
+        
+        # 检查镜像空间是否足够
+        if ! check_space "$img_mount" "$required_intermediate_gb"; then
+            WARN "${img_path}镜像空间不足，请在一键脚本主菜单选择X再选择6对其扩容后重试！"
+            exit 1
+        fi
+
+        
+        # Process each selected file
+        for file_to_process in "${files_to_process[@]}"; do
+            if ! download_and_extract "$file_to_process"; then
+                ERROR "文件 $file_to_process 处理失败，请手动删除${source_dir}/${file_to_process}文件"
+            else
+                rm -f "${source_dir}/${file_to_process}"
+            fi
+        done
+        
+        # Final success message
+        INFO "所有文件处理完成"
+        umount "$img_mount" && INFO "镜像卸载完成" || WARN "卸载 $img_mount 失败"
+        [ -n "${emby_name}" ] && docker start "${emby_name}" || INFO "容器 ${emby_name} 未启动"
+        
+        INFO "脚本执行完成"
+    }
+    media_reunzip_main
+}
+
 # 初始化颜色
 setup_colors
 
@@ -1027,4 +1323,5 @@ export Blue Green Red Yellow NC INFO ERROR WARN
 export -f INFO ERROR WARN \
     check_path check_port check_space check_root check_env check_loop_support check_qnap \
     setup_status command_exists \
-    docker_pull update_ailg restore_containers restore_containers_simple 
+    docker_pull update_ailg restore_containers restore_containers_simple \
+    xy_media_reunzip

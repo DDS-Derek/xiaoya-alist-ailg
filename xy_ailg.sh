@@ -523,7 +523,9 @@ function user_emby_fast() {
     if [ -f "${image_dir}/${emby_ailg}" ] || [ -f "${image_dir}/${emby_img}" ]; then
         echo "镜像文件已存在，跳过空间检查"
     else
-        check_space $image_dir $space_need
+        if ! check_space $image_dir $space_need; then
+            exit 1
+        fi
     fi
 
     if [[ "${f4_select}" == [1234] ]]; then
@@ -1064,8 +1066,9 @@ get_img_path() {
     case "${img_name}" in
     "emby-ailg-115.img" | "emby-ailg-lite-115.img" | "jellyfin-ailg.img" | "jellyfin-ailg-lite.img" | "jellyfin-10.9.6-ailg-lite.img" | "jellyfin-10.9.6-ailg.img") ;;
     "emby-ailg-115-4.9.img" | "emby-ailg-lite-115-4.9.img") ;;
-    "emby-ailg-115.mp4" | "emby-ailg-lite-115.mp4" | "jellyfin-ailg.mp4" | "jellyfin-ailg-lite.mp4" | "jellyfin-10.9.6-ailg-lite.mp4" | "jellyfin-10.9.6-ailg.mp4") ;;
-    "emby-ailg-115-4.9.mp4" | "emby-ailg-lite-115-4.9.mp4")
+    # "emby-ailg-115.mp4" | "emby-ailg-lite-115.mp4" | "jellyfin-ailg.mp4" | "jellyfin-ailg-lite.mp4" | "jellyfin-10.9.6-ailg-lite.mp4" | "jellyfin-10.9.6-ailg.mp4") ;;
+    # "emby-ailg-115-4.9.mp4" | "emby-ailg-lite-115-4.9.mp4")
+    "emby-ailg-115.mp4" | "emby-ailg-lite-115.mp4" | "jellyfin-ailg.mp4" | "jellyfin-ailg-lite.mp4" | "jellyfin-10.9.6-ailg-lite.mp4" | "jellyfin-10.9.6-ailg.mp4" | "emby-ailg-115-4.9.mp4" | "emby-ailg-lite-115-4.9.mp4")
         img_path="${img_path%.mp4}.img"
         ;;
     *)
@@ -1076,6 +1079,49 @@ get_img_path() {
     img_mount=${img_path%/*.img}/emby-xy
     # read -p "$(echo img_mount is: $img_mount)"
     check_path ${img_mount}
+}
+
+stop_related_containers() {
+    local img_file="$1"
+    
+    # 检查是否是.img文件
+    if [[ "$img_file" != *.img ]]; then
+        return 0
+    fi
+    
+    INFO "检查与镜像 $img_file 相关的容器..."
+    local found_container=false
+    
+    # 查找使用指定镜像的容器 - 分别查询两种镜像
+    local container_ids_1=$(docker ps -a --format '{{.ID}}' --filter "ancestor=ailg/xy-emd:latest" 2>/dev/null || echo "")
+    local container_ids_2=$(docker ps -a --format '{{.ID}}' --filter "ancestor=ddsderek/xiaoya-emd:latest" 2>/dev/null || echo "")
+    local container_ids="$container_ids_1 $container_ids_2"
+    
+    for container_id in $container_ids; do
+        # 跳过空行
+        if [ -z "$container_id" ]; then
+            continue
+        fi
+        
+        # 检查容器的挂载路径是否包含所选镜像
+        if docker inspect --format '{{ range .Mounts }}{{ println .Source }}{{ end }}' "$container_id" 2>/dev/null | grep -q "$img_file"; then
+            local container_name=$(docker ps -a --format '{{.Names}}' --filter "id=$container_id" 2>/dev/null)
+            INFO "找到使用镜像 $img_file 的容器: $container_name，正在停止..."
+            if docker stop "$container_name" > /dev/null 2>&1; then
+                INFO "容器 $container_name 已停止"
+                found_container=true
+            else
+                WARN "停止容器 $container_name 失败，请手动停止容器后重试！"
+                exit 1
+            fi
+        fi
+    done
+    
+    if ! $found_container; then
+        INFO "未找到使用镜像 $img_file 的容器"
+    fi
+    
+    return 0
 }
 
 mount_img() {
@@ -1128,13 +1174,15 @@ mount_img() {
                     done
                     img_mount=${img_path%/*.img}/emby-xy
 
-                    for op_emby in "${img_order[@]}"; do
-                        docker stop "${op_emby}"
-                        INFO "${op_emby}容器已关闭！"
-                    done
+                    # for op_emby in "${img_order[@]}"; do
+                    #     docker stop "${op_emby}"
+                    #     INFO "${op_emby}容器已关闭！"
+                    # done
+                    docker stop ${emby_name}
+                    stop_related_containers "${img_path}"
 
-                    docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
-                    INFO "小雅爬虫容器已关闭！"
+                    # docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
+                    # INFO "小雅爬虫容器已关闭！"
 
                     [[ $(basename "${img_path}") == emby*.img ]] && loop_order=/dev/loop7 || loop_order=/dev/loop6
                     umount "${loop_order}" > /dev/null 2>&1
@@ -1150,14 +1198,14 @@ mount_img() {
                             return 0
                         else
                             ERROR "挂载失败，请重启设备后重试！"
-                            exit 1
+                            return 1
                         fi
                     fi
 
                     if mount "${loop_order}" ${img_mount}; then
                         INFO "已将${Yellow}${img_path}${NC}挂载到${Yellow}${img_mount}${NC}目录！" && WARN "如您想操作小雅config数据的同步或更新，请先手动关闭${Yellow}${emby_name}${NC}容器！"
                     else
-                        ERROR "挂载失败，${Yellow}${img_mount}${NC}挂载目录非空或已经挂载，请重启设备后重试！" && exit 1
+                        ERROR "挂载失败，${Yellow}${img_mount}${NC}挂载目录非空或已经挂载，请重启设备后重试！" && return 1
                     fi
                     break
                 elif [ "${img_select}" -eq 0 ]; then
@@ -1166,7 +1214,7 @@ mount_img() {
                         INFO "已将${img_path}挂载到${img_mount}目录！"
                     else
                         ERROR "挂载失败，请重启设备后重试！"
-                        exit 1
+                        return 1
                     fi
                     break
                 else
@@ -1179,7 +1227,7 @@ mount_img() {
                 INFO "已将${img_path}挂载到${img_mount}目录！"
             else
                 ERROR "挂载失败，请重启设备后重试！"
-                exit 1
+                return 1
             fi
         fi
     else
@@ -1188,7 +1236,7 @@ mount_img() {
             INFO "已将${img_path}挂载到${img_mount}目录！"
         else
             ERROR "挂载失败，请重启设备后重试！"
-            exit 1
+            return 1
         fi
     fi
 }
@@ -1462,14 +1510,18 @@ user_selecto() {
         echo -e "\033[1;32m1、卸载全在这\033[0m"
         echo -e "\033[1;32m2、更换开心版小雅EMBY\033[0m"
         echo -e "\033[1;32m3、挂载老G速装版镜像\033[0m"
+        echo -e "\n"
         echo -e "\033[1;32m4、老G速装版镜像重装/同步config\033[0m"
         echo -e "\033[1;32m5、G-box自动更新/取消自动更新\033[0m"
         echo -e "\033[1;32m6、速装emby/jellyfin镜像扩容\033[0m"
+        echo -e "\n"
         echo -e "\033[1;32m7、修复docker镜像无法拉取（可手动配置镜像代理）\033[0m\033[0m"
         echo -e "\033[1;32m8、G-Box安装常用镜像下载（暂不可用，新方案测试中）\033[0m\033[0m"
         echo -e "\033[1;32m9、Emby/Jellyfin添加第三方播放器（适用Docker版）\033[0m\033[0m"
+        echo -e "\n"
         echo -e "\033[1;32m10、安装/配置小雅Emby爬虫同步（G-Box专用版）\033[0m\033[0m"
         echo -e "\033[1;32m11、一键安装小雅Emby音乐资源\033[0m\033[0m"
+        echo -e "\033[1;32m12、img镜像自定义重装小雅EMBY元数据\033[0m\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
         read -erp "请输入您的选择（1-9，按b返回上级菜单或按q退出）：" fo_select
@@ -1485,6 +1537,7 @@ user_selecto() {
         9) add_player; break ;;
         10) xy_emby_sync; break ;;
         11) xy_emby_music; break ;;
+        12) xy_media_reunzip; break ;;
         [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
