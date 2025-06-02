@@ -1018,20 +1018,29 @@ restore_containers_simple() {
     }
 }
 
-
 xy_media_reunzip() {
-    # Files to process mapping
-    declare -A FILE_TO_DIR_MAP=(
-        ["all.mp4"]="📺画质演示测试（4K，8K，HDR，Dolby） 动漫 每日更新 测试 电影 电视剧 纪录片 纪录片（已刮削） 综艺 音乐"
-        ["115.mp4"]="115"
-        ["pikpak.mp4"]="PikPak"
-        ["json.mp4"]="json"
-        ["短剧.mp4"]="短剧"
-        ["蓝光原盘.mp4"]="ISO"
-        ["config.mp4"]="config"
-        ["music.mp4"]="Music"
+    # Files to process mapping - 使用普通数组代替关联数组
+    FILE_OPTIONS=(
+        "all.mp4"
+        "115.mp4"
+        "pikpak.mp4"
+        "json.mp4"
+        "短剧.mp4"
+        "蓝光原盘.mp4"
+        "config.mp4"
+        "music.mp4"
     )
-
+    
+    FILE_DIRS=(
+        "📺画质演示测试（4K，8K，HDR，Dolby） 动漫 每日更新 测试 电影 电视剧 纪录片 纪录片（已刮削） 综艺 音乐"
+        "115"
+        "PikPak"
+        "json"
+        "短剧"
+        "ISO"
+        "config"
+        "Music"
+    )
 
     # --- Cleanup Function ---
     cleanup() {
@@ -1051,19 +1060,31 @@ xy_media_reunzip() {
     prepare_directories() {
         # Remove old directories in intermediate_dir based on files to process
         for file_to_download in "${files_to_process[@]}"; do
-            local dir_names_str="${FILE_TO_DIR_MAP[$file_to_download]}"
-            if [ "$file_to_download" == "config.mp4" ]; then
-                INFO "删除旧的config目录: ${img_mount}/config"
-                rm -rf "${img_mount:?}/config" # Protect against empty vars
-            else
-                # Handle multiple dirs for all.mp4
-                IFS=' ' read -r -a dir_array <<< "$dir_names_str"
-                for dir_name_part in "${dir_array[@]}"; do
-                    if [ -n "$dir_name_part" ]; then # Ensure not empty
-                        INFO "删除旧的数据目录: ${img_mount}/xiaoya/${dir_name_part}"
-                        rm -rf "${img_mount:?}/xiaoya/${dir_name_part:?}"
-                    fi
-                done
+            # 查找文件在FILE_OPTIONS中的索引
+            local idx=-1
+            for i in "${!FILE_OPTIONS[@]}"; do
+                if [ "${FILE_OPTIONS[$i]}" = "$file_to_download" ]; then
+                    idx=$i
+                    break
+                fi
+            done
+            
+            # 如果找到了索引，获取对应的目录
+            if [ $idx -ge 0 ]; then
+                local dir_names_str="${FILE_DIRS[$idx]}"
+                if [ "$file_to_download" == "config.mp4" ]; then
+                    INFO "删除旧的config目录: ${img_mount}/config"
+                    rm -rf "${img_mount:?}/config" # Protect against empty vars
+                else
+                    # Handle multiple dirs for all.mp4
+                    IFS=' ' read -r -a dir_array <<< "$dir_names_str"
+                    for dir_name_part in "${dir_array[@]}"; do
+                        if [ -n "$dir_name_part" ]; then # Ensure not empty
+                            INFO "删除旧的数据目录: ${img_mount}/xiaoya/${dir_name_part}"
+                            rm -rf "${img_mount:?}/xiaoya/${dir_name_part:?}"
+                        fi
+                    done
+                fi
             fi
         done
     }
@@ -1204,58 +1225,79 @@ xy_media_reunzip() {
         
         # Ask user to select which files to process
         echo -e "\n请选择要重新下载和解压的文件:"
-        local file_options=("all.mp4" "115.mp4" "pikpak.mp4" "json.mp4" "短剧.mp4" "蓝光原盘.mp4" "config.mp4" "music.mp4")
-        declare -A selected_files # Store 1 if selected, 0 otherwise
-        
-        # Initialize all as not selected
-        for file_key in "${file_options[@]}"; do 
-            selected_files["$file_key"]=0
+        # 使用FILE_OPTIONS数组代替file_options
+        # 初始化选择状态数组，0表示未选择，1表示已选择
+        selected_status=()
+        for ((i=0; i<${#FILE_OPTIONS[@]}; i++)); do
+            selected_status[i]=0
         done
         
         while true; do
             # Display current selection
-            for index in "${!file_options[@]}"; do
-                local file_opt="${file_options[$index]}"
+            for index in "${!FILE_OPTIONS[@]}"; do
+                local file_opt="${FILE_OPTIONS[$index]}"
                 local status_char="×"; local color="$Red"
-                if [ "${selected_files[$file_opt]}" -eq 1 ]; then 
+                if [ "${selected_status[$index]}" -eq 1 ]; then 
                     status_char="√"; color="$Green"
                 fi
                 printf "[ %-1d ] ${color}[%s] %s${NC}\n" $((index + 1)) "$status_char" "$file_opt"
             done
             printf "[ 0 ] 确认并继续\n"
             
-            local select_num
-            read -erp "请输入序号(0-${#file_options[@]}): " select_num
+            local select_input
+            read -erp "请输入序号(0-${#FILE_OPTIONS[@]})，可用逗号分隔多选: " select_input
             
-            if [[ "$select_num" =~ ^[0-9]+$ ]]; then
-                if [ "$select_num" -eq 0 ]; then
-                    local count_selected=0
-                    for file_key_chk in "${file_options[@]}"; do 
-                        if [ "${selected_files[$file_key_chk]}" -eq 1 ]; then 
-                            let count_selected+=1
-                        fi
-                    done
-                    if [ $count_selected -eq 0 ]; then 
-                        ERROR "至少选择一个文件"
-                    else 
-                        break
+            # 处理输入为0的情况
+            if [[ "$select_input" == "0" ]]; then
+                local count_selected=0
+                for ((i=0; i<${#selected_status[@]}; i++)); do
+                    if [ "${selected_status[$i]}" -eq 1 ]; then 
+                        let count_selected+=1
                     fi
-                elif [ "$select_num" -ge 1 ] && [ "$select_num" -le ${#file_options[@]} ]; then
-                    local file_to_toggle="${file_options[$((select_num-1))]}"
-                    selected_files["$file_to_toggle"]=$((1 - selected_files["$file_to_toggle"]))
+                done
+                if [ $count_selected -eq 0 ]; then 
+                    ERROR "至少选择一个文件"
                 else 
-                    ERROR "无效序号"
+                    break
                 fi
-            else 
-                ERROR "无效输入"
+                continue
             fi
+            
+            # 替换中文逗号为英文逗号
+            select_input=${select_input//，/,}
+            
+            # 分割输入的序号
+            IFS=',' read -ra select_nums <<< "$select_input"
+            
+            # 处理每个序号
+            for select_num in "${select_nums[@]}"; do
+                # 去除空格
+                select_num=$(echo "$select_num" | tr -d ' ')
+                
+                if [[ "$select_num" =~ ^[0-9]+$ ]]; then
+                    if [ "$select_num" -ge 1 ] && [ "$select_num" -le ${#FILE_OPTIONS[@]} ]; then
+                        # 切换选择状态
+                        idx=$((select_num-1))
+                        selected_status[$idx]=$((1 - selected_status[$idx]))
+                        if [ "${selected_status[$idx]}" -eq 1 ]; then
+                            INFO "已选择: ${FILE_OPTIONS[$idx]}"
+                        else
+                            INFO "已取消选择: ${FILE_OPTIONS[$idx]}"
+                        fi
+                    else 
+                        ERROR "无效序号: $select_num，请输入1-${#FILE_OPTIONS[@]}之间的数字"
+                    fi
+                else 
+                    ERROR "无效输入: $select_num，请输入数字"
+                fi
+            done
         done
         
         # Create array of files to process
         files_to_process=()
-        for file_key in "${file_options[@]}"; do
-            if [ "${selected_files[$file_key]}" -eq 1 ]; then
-                files_to_process+=("$file_key")
+        for index in "${!FILE_OPTIONS[@]}"; do
+            if [ "${selected_status[$index]}" -eq 1 ]; then
+                files_to_process+=("${FILE_OPTIONS[$index]}")
             fi
         done
         
