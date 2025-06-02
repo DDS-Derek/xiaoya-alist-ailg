@@ -892,15 +892,14 @@ img_uninstall() {
                         INFO "${op_emby}容器已关闭！"
                     done
 
-                    docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
-                    INFO "小雅爬虫容器已关闭！"
+                    docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker rm -f
+                    docker ps -a | grep 'ailg/xy-emd' | awk '{print $1}' | xargs -r docker rm -f
+                    INFO "小雅爬虫容器已删除！"
 
                     if [[ $(basename "${img_path}") == emby*.img ]]; then
                         loop_order=/dev/loop7
-                        docker rm xiaoya-emd
                     else
                         loop_order=/dev/loop6
-                        docker rm xiaoya-emd-jf
                     fi
 
                     umount "${loop_order}" > /dev/null 2>&1
