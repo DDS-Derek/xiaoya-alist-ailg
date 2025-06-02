@@ -1216,7 +1216,7 @@ xy_media_reunzip() {
             exit
         fi   
         # Verify xiaoya address is accessible
-        if ! curl -sIL "${xiaoya_addr}/d/README.md" --max-time 5 | grep -q "200 OK"; then
+        if ! curl -siL "${xiaoya_addr}/d/README.md" | grep -v 302 | grep -q "x-oss-"; then
             ERROR "无法连接到小雅alist: $xiaoya_addr"
             exit 1
         fi
