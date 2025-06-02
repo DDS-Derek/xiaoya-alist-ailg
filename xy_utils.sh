@@ -79,6 +79,7 @@ check_env() {
         "grep" "sed" "awk"
         "stat"
         "du" "df" "mount" "umount" "losetup"
+        "ps" "kill"
     )
 
     for cmd in "${required_commands[@]}"; do
@@ -118,7 +119,7 @@ install_command() {
             return $?
             ;;
         "losetup"|"mount"|"umount") pkg="util-linux" ;;
-        "kill") pkg="procps" ;;
+        "kill"|"ps"|"pkill") pkg="procps" ;;
         "grep"|"cp"|"mv"|"awk"|"sed"|"stat"|"du"|"df") pkg="coreutils" ;;
     esac
 
@@ -1019,6 +1020,9 @@ restore_containers_simple() {
 }
 
 xy_media_reunzip() {
+    # 初始化变量
+    running_container_id=""
+    
     # Files to process mapping - 使用普通数组代替关联数组
     FILE_OPTIONS=(
         "all.mp4"
@@ -1046,6 +1050,45 @@ xy_media_reunzip() {
     cleanup() {
         INFO "Attempting cleanup..."
 
+        # 终止所有可能的子进程
+        local script_pid=$$
+        
+        # 检查pkill命令是否可用
+        if command -v pkill &>/dev/null; then
+            # 首先尝试使用SIGTERM终止子进程
+            pkill -TERM -P $script_pid 2>/dev/null || true
+            sleep 1
+            # 如果子进程仍然存在，使用SIGKILL终止
+            pkill -KILL -P $script_pid 2>/dev/null || true
+        else
+            # 如果pkill不可用，尝试使用ps和kill组合
+            if command -v ps &>/dev/null; then
+                # 获取所有子进程PID
+                local child_pids=$(ps -o pid --no-headers --ppid $script_pid 2>/dev/null)
+                if [ -n "$child_pids" ]; then
+                    INFO "终止子进程: $child_pids"
+                    # 先尝试SIGTERM
+                    for pid in $child_pids; do
+                        kill -TERM $pid 2>/dev/null || true
+                    done
+                    sleep 1
+                    # 再尝试SIGKILL
+                    for pid in $child_pids; do
+                        kill -KILL $pid 2>/dev/null || true
+                    done
+                fi
+            else
+                WARN "无法终止子进程: ps和pkill命令均不可用"
+            fi
+        fi
+        
+        # 终止可能的Docker容器
+        if [ -n "$running_container_id" ]; then
+            INFO "Stopping running Docker container..."
+            docker stop $running_container_id >/dev/null 2>&1 || true
+            docker rm $running_container_id >/dev/null 2>&1 || true
+        fi
+        
         # Unmount if mounted
         if [ -n "$img_mount" ] && mount | grep -q " ${img_mount} "; then
             INFO "Unmounting ${img_mount}..."
@@ -1054,6 +1097,7 @@ xy_media_reunzip() {
         
         INFO "Cleanup attempt finished."
     }
+    # 捕获EXIT、SIGHUP、SIGINT和SIGTERM信号
     trap cleanup EXIT SIGHUP SIGINT SIGTERM
 
     # --- File Processing Functions ---
@@ -1107,9 +1151,46 @@ xy_media_reunzip() {
             return 1
         fi
         
+        # 添加处理中断的函数
+        handle_interrupt() {
+            INFO "检测到中断，正在清理..."
+            
+            # 终止Docker容器
+            if [ -n "$running_container_id" ]; then
+                docker stop $running_container_id >/dev/null 2>&1 || true
+                docker rm $running_container_id >/dev/null 2>&1 || true
+                running_container_id=""
+            fi
+            
+            # 终止所有可能的子进程
+            local script_pid=$$
+            
+            # 检查pkill命令是否可用
+            if command -v pkill &>/dev/null; then
+                pkill -TERM -P $script_pid 2>/dev/null || true
+            else
+                # 如果pkill不可用，尝试使用ps和kill组合
+                if command -v ps &>/dev/null; then
+                    # 获取所有子进程PID
+                    local child_pids=$(ps -o pid --no-headers --ppid $script_pid 2>/dev/null)
+                    if [ -n "$child_pids" ]; then
+                        INFO "终止子进程: $child_pids"
+                        for pid in $child_pids; do
+                            kill -TERM $pid 2>/dev/null || true
+                        done
+                    fi
+                fi
+            fi
+            
+            exit 1
+        }
+        
+        # 临时设置中断处理
+        trap handle_interrupt SIGINT SIGTERM
+        
         if [ "$skip_download" = true ]; then
             # 直接解压已有文件
-            docker run --rm --net=host \
+            running_container_id=$(docker run -d --rm --net=host \
                 -v "${source_dir}:/source_temp_dir" \
                 -v "${img_mount}:/dist" \
                 ailg/ggbond:latest \
@@ -1119,10 +1200,15 @@ xy_media_reunzip() {
                             7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/\" ; \
                         else \
                             7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/xiaoya\" ; \
-                        fi"
+                        fi")
+            
+            # 等待容器完成
+            docker wait $running_container_id >/dev/null 2>&1
+            extract_status=$?
+            running_container_id=""
         else
             # 下载并解压文件
-            docker run --rm --net=host \
+            running_container_id=$(docker run -d --rm --net=host \
                 -v "${source_dir}:/source_temp_dir" \
                 -v "${img_mount}:/dist" \
                 ailg/ggbond:latest \
@@ -1134,10 +1220,18 @@ xy_media_reunzip() {
                             7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/\" ; \
                         else \
                             7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/xiaoya\" ; \
-                        fi"
+                        fi")
+            
+            # 等待容器完成
+            docker wait $running_container_id >/dev/null 2>&1
+            extract_status=$?
+            running_container_id=""
         fi
         
-        if [ $? -eq 0 ]; then
+        # 恢复原来的中断处理
+        trap cleanup EXIT SIGHUP SIGINT SIGTERM
+        
+        if [ $extract_status -eq 0 ]; then
             INFO "√ $file_to_download 处理成功."
             return 0
         else
@@ -1352,7 +1446,7 @@ xy_media_reunzip() {
         
         INFO "脚本执行完成"
     }
-    media_reunzip_main
+    media_reunzip_main "$@"
 }
 
 # 初始化颜色
