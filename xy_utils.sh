@@ -245,7 +245,11 @@ check_qnap() {
 check_path() {
     dir_path=$1
     if [[ ! -d "$dir_path" ]]; then
-        read -erp "您输入的目录不存在，按Y/y创建，或按其他键退出！" yn
+        read -t 60 -erp "您输入的目录不存在，按Y/y创建，或按其他键退出！" yn || {
+            echo ""
+            INFO "等待输入超时，默认不创建目录并退出"
+            exit 0
+        }
         case $yn in
         [Yy]*)
             mkdir -p $dir_path
@@ -1023,6 +1027,9 @@ xy_media_reunzip() {
     # 初始化变量
     running_container_id=""
     
+    # 添加特殊的SIGINT处理，确保Ctrl+C能立即终止脚本
+    trap 'echo -e "\n${INFO} 检测到Ctrl+C，立即终止脚本"; exit 1' SIGINT
+    
     # Files to process mapping - 使用普通数组代替关联数组
     FILE_OPTIONS=(
         "all.mp4"
@@ -1096,6 +1103,10 @@ xy_media_reunzip() {
         fi
         
         INFO "Cleanup attempt finished."
+        
+        # 强制退出脚本，确保不会继续执行
+        # 注意：这会导致trap再次被触发，但由于我们使用exit 1而不是kill，不会导致无限循环
+        exit 1
     }
     # 捕获EXIT、SIGHUP、SIGINT和SIGTERM信号
     trap cleanup EXIT SIGHUP SIGINT SIGTERM
@@ -1339,7 +1350,13 @@ xy_media_reunzip() {
             printf "[ 0 ] 确认并继续\n"
             
             local select_input
-            read -erp "请输入序号(0-${#FILE_OPTIONS[@]})，可用逗号分隔多选: " select_input
+            # 使用-t选项设置超时，确保能够定期检查信号
+            read -t 60 -erp "请输入序号(0-${#FILE_OPTIONS[@]})，可用逗号分隔多选，或按Ctrl+C退出: " select_input || {
+                # 如果read超时，提示用户并继续
+                echo ""
+                INFO "等待输入超时，请重新输入或按Ctrl+C退出"
+                continue
+            }
             
             # 处理输入为0的情况
             if [[ "$select_input" == "0" ]]; then
@@ -1399,7 +1416,11 @@ xy_media_reunzip() {
         
         # 获取用户输入的source_dir并检查空间是否足够
         while true; do
-            read -erp "请输入临时存放下载文件的目录（默认：/tmp/xy_reunzip_source）: " source_dir
+            read -t 60 -erp "请输入临时存放下载文件的目录（默认：/tmp/xy_reunzip_source）: " source_dir || {
+                echo ""
+                INFO "等待输入超时，请重新输入或按Ctrl+C退出"
+                continue
+            }
             source_dir=${source_dir:-/tmp/xy_reunzip_source}
             check_path "$source_dir"
             
@@ -1409,7 +1430,11 @@ xy_media_reunzip() {
             if check_space "$source_dir" "$total_size_gb"; then
                 break
             else
-                read -erp "是否选择其他目录? (y/n): " choose_another
+                read -t 60 -erp "是否选择其他目录? (y/n): " choose_another || {
+                    echo ""
+                    INFO "等待输入超时，默认选择其他目录"
+                    choose_another="y"
+                }
                 if [[ ! "$choose_another" =~ ^[Yy]$ ]]; then
                     ERROR "由于空间不足，脚本终止"
                     exit 1
