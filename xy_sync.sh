@@ -414,7 +414,7 @@ function xy_emby_sync() {
     [ -n "${docker_emd_name}" ] && docker rm -f ${docker_emd_name}
     if docker_pull ailg/xy-emd:latest; then
         docker run -d --name xy-emd -e CYCLE="${sync_interval_input}" \
-            -v "${mount_path}:/media.img" --privileged --net=host \
+            -v "${mount_path}:/media.img" --privileged --net=host --restart=always \
             ailg/xy-emd:latest --dirs "${output_string}" ${rebuild_env_var} ${clean_env_var} ${dns_env_var}
         echo -e "小雅Emby爬虫G-Box专用版安装成功了！"
         return 0
