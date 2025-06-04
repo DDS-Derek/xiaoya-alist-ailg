@@ -1305,6 +1305,15 @@ xy_media_reunzip() {
             return
         fi
 
+        WARN "当前此功能只适配4.9版本的emby，如果是4.8版的不要用此功能更新config"
+        WARN "可以用此功能更新4.8版emby的其他元数据，不要更新config,否则会emby无法启动!"
+        WARN "如果用此功能更新4.8版config之外的元数据，需要自己手动添加媒体库后扫描媒体库完成更新和入库！"
+        read -p "是否继续? (y/n): " confirm_continue
+        if [[ ! "$confirm_continue" =~ ^[Yy]$ ]]; then
+            main_menu
+            return
+        fi
+
         mount_img || exit 1
         if [ -n "${emby_name}" ]; then
             if ! docker stop "${emby_name}" > /dev/null 2>&1; then
