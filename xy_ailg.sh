@@ -2098,6 +2098,21 @@ function user_gbox() {
         check_path $config_dir
         INFO "G-Box配置路径为：$config_dir"
     fi
+    # 检查旧的g-box配置文件
+    if [[ -f "${config_dir}/atv.mv.db" ]]; then
+        INFO "${Yellow}检测到旧的g-box配置文件！${NC}"
+        read -erp "是否使用旧配置数据安装？（默认使用，按N/n清除旧配置）：" use_old_config
+        if [[ ${use_old_config} == [Nn] ]]; then
+            INFO "${Red}正在清除旧的g-box配置数据...${NC}"
+            # 删除 atv. 开头的文件
+            find "${config_dir}" -maxdepth 1 -type f -name "atv.*" -exec rm -f {} \;
+            rm -rf "${config_dir:?}"/{atv,conf,log,index,tvbox} \
+                   "${config_dir:?}"/{mounts.bind,alisturl.txt,jellyfinurl.txt,embyurl.txt,sunpanelurl.txt,sun-panel.txt,115share_list.txt,pikpakshare_list.txt,quarkshare_list.txt} > /dev/null 2>&1
+            INFO "${Green}旧的g-box配置数据已清除。${NC}"
+        else
+            INFO "${Green}将使用旧的g-box配置数据进行安装。${NC}"
+        fi
+    fi
 
     read -erp "$(INFO "是否打开docker容器管理功能？（y/n）")" open_warn
     if [[ $open_warn == [Yy] ]]; then
