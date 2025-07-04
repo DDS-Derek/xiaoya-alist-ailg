@@ -1,0 +1,27 @@
+{
+  "name": "stremio-alist-gbox-addon",
+  "version": "1.0.0",
+  "description": "Stremio addon for AList with G-Box backend",
+  "main": "stremio-alist-addon.js",
+  "scripts": {
+    "start": "node stremio-alist-addon.js",
+    "dev": "nodemon stremio-alist-addon.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "axios": "^1.6.0",
+    "jsdom": "^23.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "keywords": [
+    "stremio",
+    "addon",
+    "alist",
+    "gbox",
+    "streaming"
+  ],
+  "author": "",
+  "license": "MIT"
+}
