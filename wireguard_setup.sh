@@ -868,15 +868,11 @@ start_wireguard() {
             fi
             ;;
         "openrc")
-            rc-update add "wg-quick.${WG_INTERFACE}" default
-            if rc-service "wg-quick.${WG_INTERFACE}" start; then
-                if wg show "${WG_INTERFACE}" &> /dev/null; then
-                    INFO "WireGuard服务启动成功"
-                    wg show
-                else
-                    ERROR "WireGuard服务启动但接口状态异常"
-                    return 1
-                fi
+            rc-update add wg-quick.${WG_INTERFACE} default
+            rc-service wg-quick.${WG_INTERFACE} start
+            if wg show ${WG_INTERFACE} &> /dev/null; then
+                INFO "WireGuard服务启动成功"
+                wg show
             else
                 ERROR "WireGuard服务启动失败"
                 return 1
@@ -939,7 +935,7 @@ show_status() {
     else
         echo -e "${Red}服务状态: 未运行${Font}"
     fi
-    
+
     if [[ -f "${WG_DIR}/server_info.conf" ]]; then
         source "${WG_DIR}/server_info.conf"
         echo -e "\n${Blue}=== 服务端信息 ===${Font}"
@@ -947,6 +943,30 @@ show_status() {
         echo "VPN网段: $WG_NETWORK"
         echo "服务端IP: $WG_SERVER_IP"
     fi
+
+    # 检查防火墙状态
+    echo -e "\n${Blue}=== 防火墙状态 ===${Font}"
+    detect_firewall
+
+    case "$FIREWALL_TYPE" in
+        "ufw")
+            echo "UFW规则:"
+            ufw status | grep -E "(${WG_PORT}|${WG_INTERFACE})"
+            ;;
+        "firewalld")
+            echo "firewalld规则:"
+            firewall-cmd --list-ports | grep -q "${WG_PORT}/udp" && echo "端口${WG_PORT}/udp: 已开放" || echo "端口${WG_PORT}/udp: 未开放"
+            firewall-cmd --zone=trusted --list-interfaces | grep -q "${WG_INTERFACE}" && echo "接口${WG_INTERFACE}: 已信任" || echo "接口${WG_INTERFACE}: 未信任"
+            ;;
+        "iptables")
+            echo "iptables规则:"
+            iptables -L INPUT -n | grep -q "${WG_PORT}" && echo "端口${WG_PORT}: 已开放" || echo "端口${WG_PORT}: 未开放"
+            iptables -L FORWARD -n | grep -q "${WG_INTERFACE}" && echo "转发规则: 已配置" || echo "转发规则: 未配置"
+            ;;
+        *)
+            echo "无防火墙或未检测到"
+            ;;
+    esac
 }
 
 # 列出客户端配置
@@ -1090,9 +1110,11 @@ main_menu() {
             1)
                 detect_os
                 detect_service_manager
+                detect_firewall
                 detect_startup_method
                 install_wireguard
                 setup_server
+                configure_firewall
                 start_wireguard
                 ;;
             2)
@@ -1144,6 +1166,228 @@ detect_service_manager() {
         WARN "未检测到支持的服务管理系统，WireGuard需要手动管理"
     fi
     INFO "服务管理系统: $SERVICE_MANAGER"
+}
+
+# 检测防火墙系统
+detect_firewall() {
+    FIREWALL_TYPE="none"
+
+    # 检测UFW
+    if command -v ufw &> /dev/null; then
+        if ufw status | grep -q "Status: active"; then
+            FIREWALL_TYPE="ufw"
+            INFO "检测到活跃的UFW防火墙"
+        else
+            INFO "检测到UFW但未启用"
+        fi
+    # 检测firewalld
+    elif command -v firewall-cmd &> /dev/null; then
+        if systemctl is-active --quiet firewalld; then
+            FIREWALL_TYPE="firewalld"
+            INFO "检测到活跃的firewalld防火墙"
+        else
+            INFO "检测到firewalld但未启用"
+        fi
+    # 检测iptables
+    elif command -v iptables &> /dev/null; then
+        # 检查是否有自定义iptables规则
+        if iptables -L | grep -q "Chain INPUT (policy DROP)" || iptables -L INPUT | grep -v "ACCEPT.*0.0.0.0/0" | grep -q "ACCEPT\|DROP\|REJECT"; then
+            FIREWALL_TYPE="iptables"
+            INFO "检测到自定义iptables规则"
+        else
+            INFO "检测到iptables但无严格规则"
+        fi
+    else
+        WARN "未检测到防火墙系统"
+    fi
+
+    INFO "防火墙类型: $FIREWALL_TYPE"
+}
+
+# 配置防火墙规则
+configure_firewall() {
+    if [[ "$FIREWALL_TYPE" == "none" ]]; then
+        INFO "无需配置防火墙规则"
+        return 0
+    fi
+
+    INFO "配置防火墙规则..."
+
+    case "$FIREWALL_TYPE" in
+        "ufw")
+            # UFW配置
+            INFO "配置UFW防火墙规则"
+
+            # 允许WireGuard端口
+            ufw allow ${WG_PORT}/udp comment "WireGuard"
+
+            # 配置转发规则
+            ufw route allow in on ${WG_INTERFACE}
+            ufw route allow out on ${WG_INTERFACE}
+
+            # 重新加载UFW
+            ufw reload
+
+            INFO "UFW防火墙配置完成"
+            ;;
+
+        "firewalld")
+            # firewalld配置
+            INFO "配置firewalld防火墙规则"
+
+            # 允许WireGuard端口
+            firewall-cmd --permanent --add-port=${WG_PORT}/udp
+
+            # 添加WireGuard接口到trusted区域
+            firewall-cmd --permanent --zone=trusted --add-interface=${WG_INTERFACE}
+
+            # 启用伪装（NAT）
+            firewall-cmd --permanent --add-masquerade
+
+            # 重新加载配置
+            firewall-cmd --reload
+
+            INFO "firewalld防火墙配置完成"
+            ;;
+
+        "iptables")
+            # iptables配置
+            INFO "配置iptables防火墙规则"
+
+            # 允许WireGuard端口
+            iptables -A INPUT -p udp --dport ${WG_PORT} -j ACCEPT
+
+            # 保存iptables规则（根据不同发行版）
+            if command -v iptables-save &> /dev/null; then
+                if [[ -f /etc/iptables/rules.v4 ]]; then
+                    iptables-save > /etc/iptables/rules.v4
+                elif [[ -f /etc/sysconfig/iptables ]]; then
+                    iptables-save > /etc/sysconfig/iptables
+                else
+                    WARN "无法自动保存iptables规则，请手动保存"
+                fi
+            fi
+
+            INFO "iptables防火墙配置完成"
+            ;;
+
+        *)
+            WARN "未知防火墙类型，请手动配置以下规则："
+            echo "- 允许UDP端口 ${WG_PORT}"
+            echo "- 允许${WG_INTERFACE}接口的转发流量"
+            ;;
+    esac
+}
+
+# 检测防火墙系统
+detect_firewall() {
+    FIREWALL_TYPE="none"
+
+    # 检测UFW
+    if command -v ufw &> /dev/null; then
+        if ufw status | grep -q "Status: active"; then
+            FIREWALL_TYPE="ufw"
+            INFO "检测到活跃的UFW防火墙"
+        else
+            INFO "检测到UFW但未启用"
+        fi
+    # 检测firewalld
+    elif command -v firewall-cmd &> /dev/null; then
+        if systemctl is-active --quiet firewalld; then
+            FIREWALL_TYPE="firewalld"
+            INFO "检测到活跃的firewalld防火墙"
+        else
+            INFO "检测到firewalld但未启用"
+        fi
+    # 检测iptables
+    elif command -v iptables &> /dev/null; then
+        # 检查是否有自定义iptables规则
+        if iptables -L | grep -q "Chain INPUT (policy DROP)" || iptables -L INPUT | grep -v "ACCEPT.*0.0.0.0/0" | grep -q "ACCEPT\|DROP\|REJECT"; then
+            FIREWALL_TYPE="iptables"
+            INFO "检测到自定义iptables规则"
+        else
+            INFO "检测到iptables但无严格规则"
+        fi
+    else
+        WARN "未检测到防火墙系统"
+    fi
+
+    INFO "防火墙类型: $FIREWALL_TYPE"
+}
+
+# 配置防火墙规则
+configure_firewall() {
+    if [[ "$FIREWALL_TYPE" == "none" ]]; then
+        INFO "无需配置防火墙规则"
+        return 0
+    fi
+
+    INFO "配置防火墙规则..."
+
+    case "$FIREWALL_TYPE" in
+        "ufw")
+            # UFW配置
+            INFO "配置UFW防火墙规则"
+
+            # 允许WireGuard端口
+            ufw allow ${WG_PORT}/udp comment "WireGuard"
+
+            # 配置转发规则
+            ufw route allow in on ${WG_INTERFACE}
+            ufw route allow out on ${WG_INTERFACE}
+
+            # 重新加载UFW
+            ufw reload
+
+            INFO "UFW防火墙配置完成"
+            ;;
+
+        "firewalld")
+            # firewalld配置
+            INFO "配置firewalld防火墙规则"
+
+            # 允许WireGuard端口
+            firewall-cmd --permanent --add-port=${WG_PORT}/udp
+
+            # 添加WireGuard接口到trusted区域
+            firewall-cmd --permanent --zone=trusted --add-interface=${WG_INTERFACE}
+
+            # 启用伪装（NAT）
+            firewall-cmd --permanent --add-masquerade
+
+            # 重新加载配置
+            firewall-cmd --reload
+
+            INFO "firewalld防火墙配置完成"
+            ;;
+
+        "iptables")
+            # iptables配置
+            INFO "配置iptables防火墙规则"
+
+            # 允许WireGuard端口
+            iptables -A INPUT -p udp --dport ${WG_PORT} -j ACCEPT
+
+            # 保存iptables规则（根据不同发行版）
+            if command -v iptables-save &> /dev/null; then
+                if [[ -f /etc/iptables/rules.v4 ]]; then
+                    iptables-save > /etc/iptables/rules.v4
+                elif [[ -f /etc/sysconfig/iptables ]]; then
+                    iptables-save > /etc/sysconfig/iptables
+                else
+                    WARN "无法自动保存iptables规则，请手动保存"
+                fi
+            fi
+
+            INFO "iptables防火墙配置完成"
+            ;;
+
+        *)
+            WARN "未知防火墙类型，请手动配置以下规则："
+            echo "- 允许UDP端口 ${WG_PORT}"
+            echo "- 允许${WG_INTERFACE}接口的转发流量"
+            ;;
+    esac
 }
 
 # 脚本入口
