@@ -2157,6 +2157,16 @@ function user_gbox() {
         fi
     fi
 
+    # 询问用户是否使用内置的sun-panel导航
+    echo -e "\033[1;33m是否使用内置的sun-panel导航？\033[0m"
+    read -erp "请选择：（使用-按Y/y键，不使用-按N/n键，默认使用）" use_sun_panel
+
+    # 如果用户选择不使用，写入配置文件
+    if [[ $use_sun_panel == [Nn] ]]; then
+        echo "uninstall" > "$config_dir/sun-panel.txt"
+        INFO "已设置不使用内置的sun-panel导航"
+    fi
+
     if curl -sSLf -o /tmp/share_resources.sh https://ailg.ggbond.org/share_resources.sh &> /dev/null; then
         source /tmp/share_resources.sh
         select_share_resources "$config_dir"
