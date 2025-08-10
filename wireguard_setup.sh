@@ -650,12 +650,20 @@ list_tunnels() {
         count=$((count + 1))
         tunnels+=("$tunnel_name")
 
-        local status="未运行"
+        local status_text="未运行"
+        local color="${Red}"
         if wg show "$WG_INTERFACE" &>/dev/null; then
-            status="${Green}运行中${Font}"
-        else
-            status="${Red}未运行${Font}"
+            status_text="运行中"
+            color="${Green}"
         fi
+        # 使用 -e 让颜色转义生效
+        echo -e "$count. 隧道名称: $tunnel_name"
+        echo -e "   接口: $WG_INTERFACE"
+        echo -e "   端口: $WG_PORT"
+        echo -e "   网段: $WG_NETWORK"
+        echo -e "   状态: ${color}${status_text}${Font}"
+        echo
+        continue
 
         echo "$count. 隧道名称: $tunnel_name"
         echo "   接口: $WG_INTERFACE"
@@ -723,15 +731,15 @@ save_tunnel_info() {
 
     cat > "$tunnel_info" << EOF
 # WireGuard隧道配置信息
-TUNNEL_NAME=$tunnel_name
-WG_INTERFACE=$WG_INTERFACE
-WG_PORT=$WG_PORT
-WG_NETWORK=$WG_NETWORK
-WG_SERVER_IP=$WG_SERVER_IP
-PUBLIC_IP=$PUBLIC_IP
-NETWORK_INTERFACE=$NETWORK_INTERFACE
-SERVER_PUBLIC_KEY=$(cat "${WG_KEYS_DIR}/${tunnel_name}_server_public.key" 2>/dev/null || echo "")
-CREATED_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+TUNNEL_NAME="$tunnel_name"
+WG_INTERFACE="$WG_INTERFACE"
+WG_PORT="$WG_PORT"
+WG_NETWORK="$WG_NETWORK"
+WG_SERVER_IP="$WG_SERVER_IP"
+PUBLIC_IP="$PUBLIC_IP"
+NETWORK_INTERFACE="$NETWORK_INTERFACE"
+SERVER_PUBLIC_KEY="$(cat "${WG_KEYS_DIR}/${tunnel_name}_server_public.key" 2>/dev/null || echo "")"
+CREATED_TIME="$(date '+%Y-%m-%d %H:%M:%S')"
 EOF
 
     INFO "隧道信息已保存: $tunnel_name"
