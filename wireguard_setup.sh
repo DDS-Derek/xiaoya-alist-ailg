@@ -26,11 +26,13 @@ function WARN() {
 WG_DIR="/etc/wireguard"
 WG_CONFIG_DIR="${WG_DIR}/configs"
 WG_KEYS_DIR="${WG_DIR}/keys"
-WG_INTERFACE="wg0"
-WG_PORT="51820"
-WG_NETWORK="10.3.3.0/24"
-WG_SERVER_IP="10.3.3.1"
+WG_TUNNELS_DIR="${WG_DIR}/tunnels"  # 存储多隧道信息
+WG_INTERFACE="wg0"  # 当前操作的接口，动态设置
+WG_PORT="51820"     # 当前操作的端口，动态设置
+WG_NETWORK="10.3.3.0/24"  # 当前操作的网段，动态设置
+WG_SERVER_IP="10.3.3.1"   # 当前操作的服务端IP，动态设置
 PUBLIC_IP=""
+CURRENT_TUNNEL=""   # 当前选择的隧道名称
 
 # 检测操作系统和包管理器
 detect_os() {
@@ -44,7 +46,7 @@ detect_os() {
         WARN "检测到Unraid系统，WireGuard安装可能需要特殊处理"
         return 1
     fi
-    
+
     # 检测包管理器
     if command -v apt-get &> /dev/null; then
         PACKAGE_MANAGER="apt-get"
@@ -71,7 +73,7 @@ detect_os() {
         ERROR "未找到支持的包管理器"
         return 1
     fi
-    
+
     INFO "检测到系统类型: $OS，包管理器: $PACKAGE_MANAGER"
     return 0
 }
@@ -90,6 +92,10 @@ configure_public_ip() {
     local external_ipv6
     local selected_ip
     local ip_version
+
+    # 确保依赖
+    ensure_curl
+    ensure_dns_tools
 
     # 获取外部检测到的IPv4地址
     INFO "正在检测IPv4地址..."
@@ -369,7 +375,7 @@ get_network_interface() {
 # 安装WireGuard
 install_wireguard() {
     INFO "开始安装WireGuard..."
-    
+
     case $PACKAGE_MANAGER in
         "apt-get")
             apt-get update -y
@@ -408,12 +414,12 @@ install_wireguard() {
             return 1
             ;;
     esac
-    
+
     if ! command -v wg &> /dev/null; then
         ERROR "WireGuard安装失败"
         return 1
     fi
-    
+
     INFO "WireGuard安装成功"
     return 0
 }
@@ -421,7 +427,7 @@ install_wireguard() {
 # 安装qrencode（可选）
 install_qrencode() {
     INFO "尝试安装qrencode用于生成二维码..."
-    
+
     case $PACKAGE_MANAGER in
         "apt-get")
             apt-get install -y qrencode 2>/dev/null || WARN "qrencode安装失败，将跳过二维码功能"
@@ -449,76 +455,488 @@ install_qrencode() {
             WARN "未知包管理器，跳过qrencode安装"
             ;;
     esac
+    }
+
+
+# 通用依赖检查与安装
+ensure_pkg() {
+    local pkg_cmd="$1"   # 要检测的命令名
+    local pkg_name="$2"  # 包名称（用于安装）
+    if command -v "$pkg_cmd" >/dev/null 2>&1; then
+        return 0
+    fi
+    if [[ -z "$PACKAGE_MANAGER" ]]; then
+        detect_os || return 1
+    fi
+    INFO "未检测到命令 $pkg_cmd，尝试通过 $PACKAGE_MANAGER 安装 $pkg_name..."
+    case $PACKAGE_MANAGER in
+        "apt-get") apt-get update -y && apt-get install -y "$pkg_name" || return 1 ;;
+        "yum") yum install -y "$pkg_name" || return 1 ;;
+        "dnf") dnf install -y "$pkg_name" || return 1 ;;
+        "zypper") zypper install -y "$pkg_name" || return 1 ;;
+        "pacman") pacman -Sy --noconfirm "$pkg_name" || return 1 ;;
+        "apk") apk add --no-cache "$pkg_name" || return 1 ;;
+        "opkg") opkg update && opkg install "$pkg_name" || return 1 ;;
+        *) WARN "未知包管理器，无法自动安装 $pkg_name"; return 1 ;;
+    esac
 }
+
+ensure_net_tools() {
+    # ss 或 netstat 至少一个；ip、iptables也要
+    if ! command -v ss >/dev/null 2>&1 && ! command -v netstat >/dev/null 2>&1; then
+        # 尝试安装常见网络工具包
+        case $PACKAGE_MANAGER in
+            "apt-get") ensure_pkg netstat net-tools || true ;;
+            "yum"|"dnf") ensure_pkg ss iproute || true ; ensure_pkg netstat net-tools || true ;;
+            "zypper") ensure_pkg ss iproute2 || true ; ensure_pkg netstat net-tools || true ;;
+            "pacman") ensure_pkg ss iproute2 || true ; ensure_pkg netstat net-tools || true ;;
+            "apk") ensure_pkg ss iproute2 || true ; ensure_pkg netstat net-tools || true ;;
+            "opkg") ensure_pkg ip ip-full || true ;;
+        esac
+    fi
+    # ip 命令
+    command -v ip >/dev/null 2>&1 || ensure_pkg ip iproute2 || true
+}
+
+ensure_dns_tools() {
+    # nslookup 或 dig 用于解析域名
+    if ! command -v nslookup >/dev/null 2>&1 && ! command -v dig >/dev/null 2>&1; then
+        case $PACKAGE_MANAGER in
+            "apt-get") ensure_pkg nslookup dnsutils || true ;;
+            "yum"|"dnf") ensure_pkg nslookup bind-utils || true ;;
+            "zypper") ensure_pkg nslookup bind-utils || true ;;
+            "pacman") ensure_pkg nslookup bind-tools || true ;;
+            "apk") ensure_pkg nslookup bind-tools || true ;;
+            "opkg") ensure_pkg nslookup bind-dig || true ;;
+        esac
+    fi
+}
+
+ensure_curl() {
+    command -v curl >/dev/null 2>&1 || ensure_pkg curl curl || true
+}
+
+ensure_qrencode() {
+    command -v qrencode >/dev/null 2>&1 || install_qrencode || true
+}
+
 
 # 创建目录结构
 create_directories() {
-    mkdir -p "$WG_DIR" "$WG_CONFIG_DIR" "$WG_KEYS_DIR"
+    mkdir -p "$WG_DIR" "$WG_CONFIG_DIR" "$WG_KEYS_DIR" "$WG_TUNNELS_DIR"
     chmod 700 "$WG_DIR" "$WG_KEYS_DIR"
-    chmod 755 "$WG_CONFIG_DIR"
+    chmod 755 "$WG_CONFIG_DIR" "$WG_TUNNELS_DIR"
+}
+
+# 获取下一个可用的接口名称
+get_next_interface() {
+    local base_name="wg"
+    for i in {0..99}; do
+        local interface="${base_name}${i}"
+        if [[ ! -f "${WG_DIR}/${interface}.conf" ]] && ! ip link show "$interface" &>/dev/null; then
+            echo "$interface"
+            return
+        fi
+    done
+    ERROR "无可用接口名称"
+    exit 1
+}
+
+# 获取下一个可用的端口
+get_next_port() {
+    local start_port=51820
+    for ((port=start_port; port<=65535; port++)); do
+        # 检查端口是否被占用（优先使用ss，fallback到netstat）
+        local port_in_use=false
+        if command -v ss >/dev/null 2>&1; then
+            if ss -ulpn 2>/dev/null | grep -q ":${port} "; then
+                port_in_use=true
+            fi
+        elif command -v netstat >/dev/null 2>&1; then
+            if netstat -ulpn 2>/dev/null | grep -q ":${port} "; then
+                port_in_use=true
+            fi
+        fi
+
+        if [[ "$port_in_use" == false ]]; then
+            # 检查是否已被其他隧道使用
+            local used=false
+            for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+                [[ -f "$tunnel_info" ]] || continue
+                if grep -q "^WG_PORT=${port}$" "$tunnel_info"; then
+                    used=true
+                    break
+                fi
+            done
+            if [[ "$used" == false ]]; then
+                echo "$port"
+                return
+            fi
+        fi
+    done
+    ERROR "无可用端口"
+    exit 1
+}
+
+# 获取下一个可用的网段
+get_next_network() {
+    local base_networks=("10.3.3.0/24" "10.3.4.0/24" "10.3.5.0/24" "10.3.6.0/24" "10.3.7.0/24" "10.3.8.0/24" "10.3.9.0/24" "10.3.10.0/24")
+
+    for network in "${base_networks[@]}"; do
+        local used=false
+        for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+            [[ -f "$tunnel_info" ]] || continue
+            if grep -q "^WG_NETWORK=${network}$" "$tunnel_info"; then
+                used=true
+                break
+            fi
+        done
+        if [[ "$used" == false ]]; then
+            echo "$network"
+            return
+        fi
+    done
+
+    # 如果预定义网段都被使用，生成随机网段
+    for i in {11..254}; do
+        local network="10.3.${i}.0/24"
+        local used=false
+        for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+            [[ -f "$tunnel_info" ]] || continue
+            if grep -q "^WG_NETWORK=${network}$" "$tunnel_info"; then
+                used=true
+                break
+            fi
+        done
+        if [[ "$used" == false ]]; then
+            echo "$network"
+            return
+        fi
+    done
+
+    ERROR "无可用网段"
+    exit 1
 }
 
 # 生成密钥对
 generate_keys() {
     local name=$1
-    local private_key="${WG_KEYS_DIR}/${name}_private.key"
-    local public_key="${WG_KEYS_DIR}/${name}_public.key"
-    
+    local tunnel_name=${2:-"default"}  # 支持隧道特定的密钥
+    local private_key="${WG_KEYS_DIR}/${tunnel_name}_${name}_private.key"
+    local public_key="${WG_KEYS_DIR}/${tunnel_name}_${name}_public.key"
+
     if [[ ! -f "$private_key" ]]; then
         wg genkey > "$private_key"
         chmod 600 "$private_key"
         wg pubkey < "$private_key" > "$public_key"
         chmod 644 "$public_key"
-        INFO "生成密钥对: $name"
+        INFO "生成密钥对: ${tunnel_name}_${name}"
     else
-        INFO "密钥对已存在: $name"
+        INFO "密钥对已存在: ${tunnel_name}_${name}"
     fi
+}
+
+# 列出现有隧道
+list_tunnels() {
+    echo -e "\n${Blue}=== 现有WireGuard隧道 ===${Font}"
+    local tunnels=()
+    local count=0
+
+    for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+        [[ -f "$tunnel_info" ]] || continue
+        local tunnel_name=$(basename "$tunnel_info" .conf)
+        source "$tunnel_info"
+
+        count=$((count + 1))
+        tunnels+=("$tunnel_name")
+
+        local status="未运行"
+        if wg show "$WG_INTERFACE" &>/dev/null; then
+            status="${Green}运行中${Font}"
+        else
+            status="${Red}未运行${Font}"
+        fi
+
+        echo "$count. 隧道名称: $tunnel_name"
+        echo "   接口: $WG_INTERFACE"
+        echo "   端口: $WG_PORT"
+        echo "   网段: $WG_NETWORK"
+        echo "   状态: $status"
+        echo
+    done
+
+    if [[ $count -eq 0 ]]; then
+        echo "暂无WireGuard隧道"
+        return 1
+    fi
+
+    return 0
+}
+
+# 选择隧道
+select_tunnel() {
+    local prompt_msg=${1:-"请选择要操作的隧道"}
+
+    if ! list_tunnels; then
+        return 1
+    fi
+
+    local tunnels=()
+    for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+        [[ -f "$tunnel_info" ]] || continue
+        tunnels+=($(basename "$tunnel_info" .conf))
+    done
+
+    echo "$prompt_msg:"
+    read -p "请输入隧道编号 [1-${#tunnels[@]}]: " choice
+
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] || [[ $choice -lt 1 ]] || [[ $choice -gt ${#tunnels[@]} ]]; then
+        ERROR "无效选择"
+        return 1
+    fi
+
+    local selected_tunnel="${tunnels[$((choice-1))]}"
+    load_tunnel_config "$selected_tunnel"
+    return 0
+}
+
+# 加载隧道配置
+load_tunnel_config() {
+    local tunnel_name=$1
+    local tunnel_info="${WG_TUNNELS_DIR}/${tunnel_name}.conf"
+
+    if [[ ! -f "$tunnel_info" ]]; then
+        ERROR "隧道配置不存在: $tunnel_name"
+        return 1
+    fi
+
+    source "$tunnel_info"
+    CURRENT_TUNNEL="$tunnel_name"
+    INFO "已加载隧道配置: $tunnel_name ($WG_INTERFACE)"
+    return 0
+}
+
+# 保存隧道配置信息
+save_tunnel_info() {
+    local tunnel_name=$1
+    local tunnel_info="${WG_TUNNELS_DIR}/${tunnel_name}.conf"
+
+    cat > "$tunnel_info" << EOF
+# WireGuard隧道配置信息
+TUNNEL_NAME=$tunnel_name
+WG_INTERFACE=$WG_INTERFACE
+WG_PORT=$WG_PORT
+WG_NETWORK=$WG_NETWORK
+WG_SERVER_IP=$WG_SERVER_IP
+PUBLIC_IP=$PUBLIC_IP
+NETWORK_INTERFACE=$NETWORK_INTERFACE
+SERVER_PUBLIC_KEY=$(cat "${WG_KEYS_DIR}/${tunnel_name}_server_public.key" 2>/dev/null || echo "")
+CREATED_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+EOF
+
+    INFO "隧道信息已保存: $tunnel_name"
+}
+
+# 设置新隧道
+setup_new_tunnel() {
+    echo -e "\n${Blue}=== 创建新的WireGuard隧道 ===${Font}"
+
+    # 获取隧道名称
+    while true; do
+        read -p "请输入新隧道名称 (如: home, office, vpn1): " tunnel_name
+        if [[ -z "$tunnel_name" ]]; then
+            ERROR "隧道名称不能为空"
+            continue
+        fi
+
+        # 检查名称是否已存在
+        if [[ -f "${WG_TUNNELS_DIR}/${tunnel_name}.conf" ]]; then
+            ERROR "隧道名称已存在: $tunnel_name"
+            continue
+        fi
+
+        # 检查名称格式
+        if [[ ! "$tunnel_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            ERROR "隧道名称只能包含字母、数字、下划线和连字符"
+            continue
+        fi
+
+        break
+    done
+
+    # 自动分配接口、端口和网段
+    WG_INTERFACE=$(get_next_interface)
+    WG_PORT=$(get_next_port)
+    WG_NETWORK=$(get_next_network)
+    WG_SERVER_IP=$(echo $WG_NETWORK | sed 's/0\/24/1/')
+    CURRENT_TUNNEL="$tunnel_name"
+
+    INFO "新隧道配置:"
+    INFO "隧道名称: $tunnel_name"
+    INFO "接口名称: $WG_INTERFACE"
+    INFO "监听端口: $WG_PORT"
+    INFO "VPN网段: $WG_NETWORK"
+    INFO "服务端IP: $WG_SERVER_IP"
+
+    # 询问是否自定义配置
+    echo
+    read -p "是否自定义配置? (y/N): " customize
+    if [[ "$customize" =~ ^[Yy]$ ]]; then
+        customize_tunnel_config
+    fi
+
+    # 继续配置流程
+    configure_tunnel_server "$tunnel_name"
+}
+
+# 自定义隧道配置
+customize_tunnel_config() {
+    echo -e "\n${Blue}=== 自定义隧道配置 ===${Font}"
+
+    # 自定义端口
+    read -p "设置监听端口 [当前: $WG_PORT]: " custom_port
+    if [[ -n "$custom_port" ]]; then
+        if [[ "$custom_port" =~ ^[0-9]+$ ]] && [[ $custom_port -ge 1024 ]] && [[ $custom_port -le 65535 ]]; then
+            WG_PORT="$custom_port"
+        else
+            WARN "无效端口，使用默认值: $WG_PORT"
+        fi
+    fi
+
+    # 自定义网段
+    read -p "设置VPN网段 [当前: $WG_NETWORK]: " custom_network
+    if [[ -n "$custom_network" ]]; then
+        if [[ "$custom_network" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+            WG_NETWORK="$custom_network"
+            WG_SERVER_IP=$(echo $WG_NETWORK | sed 's/0\/24/1/')
+        else
+            WARN "无效网段格式，使用默认值: $WG_NETWORK"
+        fi
+    fi
+
+    INFO "更新后的配置:"
+    INFO "监听端口: $WG_PORT"
+    INFO "VPN网段: $WG_NETWORK"
+    INFO "服务端IP: $WG_SERVER_IP"
+}
+
+# 重置隧道
+reset_tunnel() {
+    local tunnel_name=$1
+
+    INFO "重置隧道: $tunnel_name"
+
+    # 停止隧道服务
+    if wg show "$WG_INTERFACE" &>/dev/null; then
+        INFO "停止隧道服务: $WG_INTERFACE"
+        wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
+    fi
+
+    # 删除相关配置文件
+    rm -f "${WG_DIR}/${WG_INTERFACE}.conf"
+    rm -f "${WG_CONFIG_DIR}/${tunnel_name}_"*.conf
+    rm -f "${WG_KEYS_DIR}/${tunnel_name}_"*.key
+
+    INFO "隧道 $tunnel_name 已重置，开始重新配置..."
+
+    # 重新配置隧道
+    configure_tunnel_server "$tunnel_name"
 }
 
 # 配置服务端
 setup_server() {
     INFO "配置WireGuard服务端..."
 
+    # 检查是否存在现有隧道
+    local existing_tunnels=()
+    for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+        [[ -f "$tunnel_info" ]] || continue
+        existing_tunnels+=($(basename "$tunnel_info" .conf))
+    done
+
+    if [[ ${#existing_tunnels[@]} -gt 0 ]]; then
+        echo -e "\n${Yellow}检测到现有WireGuard隧道：${Font}"
+        list_tunnels
+
+        echo -e "${Yellow}请选择操作：${Font}"
+        echo "1. 创建新的隧道"
+        echo "2. 重置现有隧道配置"
+        echo "3. 取消操作"
+        read -p "请选择 [1-3]: " action_choice
+
+        case "$action_choice" in
+            1)
+                INFO "创建新的隧道"
+                setup_new_tunnel
+                return
+                ;;
+            2)
+                echo -e "\n${Red}警告：重置隧道将删除所有现有客户端配置！${Font}"
+                if ! select_tunnel "请选择要重置的隧道"; then
+                    return 1
+                fi
+                read -p "确认重置隧道 $CURRENT_TUNNEL? (y/N): " confirm_reset
+                if [[ ! "$confirm_reset" =~ ^[Yy]$ ]]; then
+                    INFO "操作已取消"
+                    return 1
+                fi
+                INFO "重置隧道: $CURRENT_TUNNEL"
+                reset_tunnel "$CURRENT_TUNNEL"
+                ;;
+            3)
+                INFO "操作已取消"
+                return 1
+                ;;
+            *)
+                ERROR "无效选择"
+                return 1
+                ;;
+        esac
+    else
+        INFO "未检测到现有隧道，创建第一个隧道"
+        setup_new_tunnel
+        return
+    fi
+
+    # 如果是重置现有隧道，继续使用现有配置
+    if [[ -n "$CURRENT_TUNNEL" ]]; then
+        configure_tunnel_server "$CURRENT_TUNNEL"
+    fi
+}
+
+# 配置隧道服务端
+configure_tunnel_server() {
+    local tunnel_name=$1
+
+    INFO "配置隧道服务端: $tunnel_name"
+
     # 配置公网IP
     configure_public_ip
+
+
+    # 确保依赖命令
+    ensure_net_tools
 
     # 获取配置参数
     local public_ip="$PUBLIC_IP"
     local network_interface=$(get_network_interface)
-    
-    # 用户自定义配置
-    echo -e "\n${Blue}=== 服务端配置 ===${Font}"
-    read -p "设置WireGuard监听端口 [默认: $WG_PORT]: " custom_port
-    WG_PORT=${custom_port:-$WG_PORT}
-    
-    read -p "设置VPN网段，CIDR写法，示例：192.168.3.0/24 [默认: $WG_NETWORK]: " custom_network
-    WG_NETWORK=${custom_network:-$WG_NETWORK}
-    WG_SERVER_IP=$(echo $WG_NETWORK | sed 's/0\/24/1/')
-    
-    # read -p "服务器公网IP [默认: $public_ip]: " custom_ip
-    # public_ip=${custom_ip:-$public_ip}
-    
-    read -p "设置网络接口 [默认: $network_interface]: " custom_interface
-    network_interface=${custom_interface:-$network_interface}
 
-    # 配置目录路径
-    echo
-    read -p "设置WireGuard配置目录 [默认: $WG_DIR]: " custom_dir
-    if [[ -n "$custom_dir" ]]; then
-        WG_DIR="$custom_dir"
-        WG_CONFIG_DIR="${WG_DIR}/configs"
-        WG_KEYS_DIR="${WG_DIR}/keys"
-        INFO "配置目录设置为: $WG_DIR"
+    # 如果是新隧道，允许用户自定义网络接口
+    if [[ -z "$CURRENT_TUNNEL" ]] || [[ "$CURRENT_TUNNEL" != "$tunnel_name" ]]; then
+        echo -e "\n${Blue}=== 服务端网络配置 ===${Font}"
+        read -p "设置网络接口 [默认: $network_interface]: " custom_interface
+        network_interface=${custom_interface:-$network_interface}
+        NETWORK_INTERFACE="$network_interface"
     fi
 
     # 创建目录结构
     create_directories
 
-    # 生成服务端密钥
-    generate_keys "server"
-    
-    local server_private=$(cat "${WG_KEYS_DIR}/server_private.key")
-    
+    # 生成服务端密钥（使用隧道特定的密钥）
+    generate_keys "server" "$tunnel_name"
+
+    local server_private=$(cat "${WG_KEYS_DIR}/${tunnel_name}_server_private.key")
+
     # 根据IP版本配置防火墙规则
     local postup_rules
     local postdown_rules
@@ -572,17 +990,21 @@ PostDown = $postdown_rules
 
 # 客户端配置将自动添加到此处
 EOF
-    
-    # 保存服务端信息
+
+    # 保存隧道信息
+    save_tunnel_info "$tunnel_name"
+
+    # 保存服务端信息（兼容旧版本）
     cat > "${WG_DIR}/server_info.conf" << EOF
 PUBLIC_IP=$public_ip
 WG_PORT=$WG_PORT
 WG_NETWORK=$WG_NETWORK
 WG_SERVER_IP=$WG_SERVER_IP
 NETWORK_INTERFACE=$network_interface
-SERVER_PUBLIC_KEY=$(cat "${WG_KEYS_DIR}/server_public.key")
+SERVER_PUBLIC_KEY=$(cat "${WG_KEYS_DIR}/${tunnel_name}_server_public.key")
+TUNNEL_NAME=$tunnel_name
 EOF
-    
+
     # 启用IP转发
     if [[ "$PUBLIC_IP" =~ : ]]; then
         # IPv6环境
@@ -613,64 +1035,209 @@ EOF
             INFO "IPv4转发已启用"
         fi
     fi
-    
-    INFO "服务端配置完成"
-    INFO "服务端公钥: $(cat "${WG_KEYS_DIR}/server_public.key")"
+
+    INFO "隧道服务端配置完成: $tunnel_name"
+    INFO "接口名称: $WG_INTERFACE"
+    INFO "服务端公钥: $(cat "${WG_KEYS_DIR}/${tunnel_name}_server_public.key")"
     INFO "服务端地址: ${public_ip}:${WG_PORT}"
     INFO "VPN网段: $WG_NETWORK"
+
+    # 设置当前隧道
+    CURRENT_TUNNEL="$tunnel_name"
+}
+
+# 删除隧道
+delete_tunnel() {
+    if ! list_tunnels; then
+        return 1
+    fi
+
+    if ! select_tunnel "请选择要删除的隧道"; then
+        return 1
+    fi
+
+    local tunnel_name="$CURRENT_TUNNEL"
+
+    echo -e "\n${Red}警告: 此操作将完全删除隧道 $tunnel_name 及其所有配置文件${Font}"
+    echo "包括："
+    echo "- 隧道配置文件"
+    echo "- 所有客户端配置"
+    echo "- 密钥文件"
+    echo "- 隧道信息"
+    echo
+    read -p "确认删除隧道 $tunnel_name? (y/N): " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        INFO "操作已取消"
+        return 1
+    fi
+
+    # 停止隧道服务
+    if wg show "$WG_INTERFACE" &>/dev/null; then
+        INFO "停止隧道服务: $WG_INTERFACE"
+        case $SERVICE_MANAGER in
+            "systemd")
+                if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
+                    systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null || true
+                    systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null || true
+                else
+                    wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
+                fi
+                ;;
+            *)
+                wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
+                ;;
+        esac
+    fi
+
+    # 删除配置文件
+    rm -f "${WG_DIR}/${WG_INTERFACE}.conf"
+    rm -f "${WG_TUNNELS_DIR}/${tunnel_name}.conf"
+
+    # 删除客户端配置
+    rm -f "${WG_CONFIG_DIR}/${tunnel_name}_"*.conf
+
+    # 删除密钥文件
+    rm -f "${WG_KEYS_DIR}/${tunnel_name}_"*.key
+
+    # 移除防火墙规则
+    remove_firewall_rules
+
+    INFO "隧道 $tunnel_name 已完全删除"
+    CURRENT_TUNNEL=""
+}
+
+# 移除防火墙规则
+remove_firewall_rules() {
+    if [[ "$FIREWALL_TYPE" == "none" ]]; then
+        return 0
+    fi
+
+    INFO "移除防火墙规则..."
+
+    case "$FIREWALL_TYPE" in
+        "ufw")
+            ufw delete allow ${WG_PORT}/udp 2>/dev/null || true
+            ufw route delete allow in on ${WG_INTERFACE} 2>/dev/null || true
+            ufw route delete allow out on ${WG_INTERFACE} 2>/dev/null || true
+            ufw reload
+            ;;
+        "firewalld")
+            firewall-cmd --permanent --remove-port=${WG_PORT}/udp 2>/dev/null || true
+            firewall-cmd --permanent --zone=trusted --remove-interface=${WG_INTERFACE} 2>/dev/null || true
+            firewall-cmd --reload
+            ;;
+        "iptables")
+            iptables -D INPUT -p udp --dport ${WG_PORT} -j ACCEPT 2>/dev/null || true
+            ;;
+    esac
+}
+
+# 显示隧道详细信息
+show_tunnel_details() {
+    if ! list_tunnels; then
+        return 1
+    fi
+
+    if ! select_tunnel "请选择要查看的隧道"; then
+        return 1
+    fi
+
+    local tunnel_name="$CURRENT_TUNNEL"
+
+    echo -e "\n${Blue}=== 隧道详细信息: $tunnel_name ===${Font}"
+    echo "接口名称: $WG_INTERFACE"
+    echo "监听端口: $WG_PORT"
+    echo "VPN网段: $WG_NETWORK"
+    echo "服务端IP: $WG_SERVER_IP"
+    echo "公网地址: $PUBLIC_IP"
+
+    # 显示运行状态
+    if wg show "$WG_INTERFACE" &>/dev/null; then
+        echo -e "运行状态: ${Green}运行中${Font}"
+        echo -e "\n${Blue}=== 接口详情 ===${Font}"
+        wg show "$WG_INTERFACE"
+    else
+        echo -e "运行状态: ${Red}未运行${Font}"
+    fi
+
+    # 显示客户端列表
+    echo -e "\n${Blue}=== 客户端列表 ===${Font}"
+    local client_configs=$(ls "${WG_CONFIG_DIR}/${tunnel_name}_"*.conf 2>/dev/null)
+    if [[ -n "$client_configs" ]]; then
+        for config in $client_configs; do
+            local client_name=$(basename "$config" .conf | sed "s/^${tunnel_name}_//")
+            local client_ip=$(grep "Address" "$config" | awk '{print $3}' | cut -d'/' -f1)
+            echo "- $client_name ($client_ip)"
+        done
+    else
+        echo "暂无客户端配置"
+    fi
 }
 
 # 生成客户端配置
 generate_client_config() {
-    if [[ ! -f "${WG_DIR}/server_info.conf" ]]; then
-        ERROR "服务端未配置，请先运行服务端安装"
+    # 检查是否有可用隧道
+    if ! list_tunnels; then
+        ERROR "未找到可用隧道，请先创建WireGuard服务端"
         return 1
     fi
-    
-    # 加载服务端信息
-    source "${WG_DIR}/server_info.conf"
-    
+
+    # 选择隧道
+    if ! select_tunnel "请选择要添加客户端的隧道"; then
+        return 1
+    fi
+
+    local tunnel_name="$CURRENT_TUNNEL"
+    INFO "为隧道 $tunnel_name 生成客户端配置"
+
     echo -e "\n${Blue}=== 生成客户端配置 ===${Font}"
     read -p "请输入客户端名称 (如: laptop, phone, tablet): " client_name
-    
+
     if [[ -z "$client_name" ]]; then
         ERROR "客户端名称不能为空"
         return 1
     fi
-    
-    # 检查是否已存在
-    if [[ -f "${WG_CONFIG_DIR}/${client_name}.conf" ]]; then
-        read -p "客户端 $client_name 已存在，是否覆盖? (y/N): " overwrite
+
+    # 检查客户端名称格式
+    if [[ ! "$client_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        ERROR "客户端名称只能包含字母、数字、下划线和连字符"
+        return 1
+    fi
+
+    # 检查是否已存在（使用隧道特定的命名）
+    local client_config_file="${WG_CONFIG_DIR}/${tunnel_name}_${client_name}.conf"
+    if [[ -f "$client_config_file" ]]; then
+        read -p "客户端 $client_name 在隧道 $tunnel_name 中已存在，是否覆盖? (y/N): " overwrite
         if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
             return 1
         fi
     fi
-    
-    # 生成客户端密钥
-    generate_keys "$client_name"
-    
+
+    # 生成客户端密钥（使用隧道特定的密钥）
+    generate_keys "$client_name" "$tunnel_name"
+
     # 分配IP地址
-    local client_ip=$(get_next_client_ip)
-    
+    local client_ip=$(get_next_client_ip "$tunnel_name")
+
     # 询问路由配置
     echo "路由配置选项:"
     echo "1. 全部流量通过VPN (AllowedIPs = 0.0.0.0/0)"
     echo "2. 仅VPN网段流量 (AllowedIPs = $WG_NETWORK)"
-    read -p "请选择 [1-2, 默认: 1]: " route_choice
-    
-    local allowed_ips="0.0.0.0/0"
-    if [[ "$route_choice" == "2" ]]; then
-        allowed_ips="$WG_NETWORK"
+    read -p "请选择 [1-2, 默认: 2]: " route_choice
+
+    local allowed_ips="$WG_NETWORK"
+    if [[ "$route_choice" == "1" ]]; then
+        allowed_ips="0.0.0.0/0"
     fi
-    
+
     # 询问DNS配置
     read -p "DNS服务器 [默认: 8.8.8.8,1.1.1.1]: " custom_dns
     local dns_servers=${custom_dns:-"8.8.8.8,1.1.1.1"}
-    
-    local client_private=$(cat "${WG_KEYS_DIR}/${client_name}_private.key")
-    
+
+    local client_private=$(cat "${WG_KEYS_DIR}/${tunnel_name}_${client_name}_private.key")
+
     # 生成客户端配置文件
-    cat > "${WG_CONFIG_DIR}/${client_name}.conf" << EOF
+    cat > "$client_config_file" << EOF
 [Interface]
 PrivateKey = $client_private
 Address = $client_ip/32
@@ -682,30 +1249,30 @@ Endpoint = $PUBLIC_IP:$WG_PORT
 AllowedIPs = $allowed_ips
 PersistentKeepalive = 25
 EOF
-    
+
     # 添加客户端到服务端配置
-    local client_public=$(cat "${WG_KEYS_DIR}/${client_name}_public.key")
+    local client_public=$(cat "${WG_KEYS_DIR}/${tunnel_name}_${client_name}_public.key")
     cat >> "${WG_DIR}/${WG_INTERFACE}.conf" << EOF
 
-# Client: $client_name
+# Client: ${tunnel_name}_${client_name}
 [Peer]
 PublicKey = $client_public
 AllowedIPs = $client_ip/32
 EOF
-    
-    INFO "客户端配置生成完成: ${WG_CONFIG_DIR}/${client_name}.conf"
+
+    INFO "客户端配置生成完成: $client_config_file"
     INFO "客户端IP地址: $client_ip"
-    
+
     # 显示配置文件内容
     echo -e "\n${Blue}=== 客户端配置文件内容 ===${Font}"
-    cat "${WG_CONFIG_DIR}/${client_name}.conf"
-    
+    cat "$client_config_file"
+
     # 生成二维码（如果支持）
     if command -v qrencode &> /dev/null; then
         echo -e "\n${Blue}=== 配置二维码 ===${Font}"
-        qrencode -t ansiutf8 < "${WG_CONFIG_DIR}/${client_name}.conf"
+        qrencode -t ansiutf8 < "$client_config_file"
     fi
-    
+
     # 重启WireGuard服务以应用新配置
     if systemctl is-active --quiet wg-quick@${WG_INTERFACE}; then
         systemctl restart wg-quick@${WG_INTERFACE}
@@ -715,9 +1282,10 @@ EOF
 
 # 获取下一个可用的客户端IP
 get_next_client_ip() {
+    local tunnel_name=${1:-"default"}
     local base_ip=$(echo $WG_SERVER_IP | cut -d'.' -f1-3)
     local used_ips=$(grep -h "AllowedIPs.*32" "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null | grep -o "${base_ip}\.[0-9]*" | sort -V)
-    
+
     for i in {2..254}; do
         local test_ip="${base_ip}.${i}"
         if [[ "$test_ip" != "$WG_SERVER_IP" ]] && ! echo "$used_ips" | grep -q "^${test_ip}$"; then
@@ -725,7 +1293,7 @@ get_next_client_ip() {
             return
         fi
     done
-    
+
     ERROR "无可用IP地址"
     exit 1
 }
@@ -749,7 +1317,7 @@ detect_startup_method() {
 # 配置开机自启动
 setup_autostart() {
     local wg_command="wg-quick up \"${WG_DIR}/${WG_INTERFACE}.conf\""
-    
+
     case $STARTUP_METHOD in
         "synology")
             if ! grep -qF -- "$wg_command" /etc/rc.local; then
@@ -800,7 +1368,7 @@ setup_autostart() {
 # 移除开机自启动
 remove_autostart() {
     local wg_command="wg-quick up \"${WG_DIR}/${WG_INTERFACE}.conf\""
-    
+
     case $STARTUP_METHOD in
         "synology")
             if [ -f /etc/rc.local ]; then
@@ -834,8 +1402,13 @@ remove_autostart() {
 
 # 启动WireGuard服务
 start_wireguard() {
-    INFO "启动WireGuard服务..."
-    
+    if [[ -z "$CURRENT_TUNNEL" ]]; then
+        ERROR "未选择隧道，请先选择要启动的隧道"
+        return 1
+    fi
+
+    INFO "启动WireGuard隧道: $CURRENT_TUNNEL ($WG_INTERFACE)..."
+
     case $SERVICE_MANAGER in
         "systemd")
             # 检查是否使用默认目录
@@ -896,8 +1469,13 @@ start_wireguard() {
 
 # 停止WireGuard服务
 stop_wireguard() {
-    INFO "停止WireGuard服务..."
-    
+    if [[ -z "$CURRENT_TUNNEL" ]]; then
+        ERROR "未选择隧道，请先选择要停止的隧道"
+        return 1
+    fi
+
+    INFO "停止WireGuard隧道: $CURRENT_TUNNEL ($WG_INTERFACE)..."
+
     case $SERVICE_MANAGER in
         "systemd")
             if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
@@ -918,31 +1496,58 @@ stop_wireguard() {
             remove_autostart
             ;;
     esac
-    
-    INFO "WireGuard服务已停止"
+
+    INFO "WireGuard隧道已停止: $CURRENT_TUNNEL"
 }
 
 # 查看服务状态
 show_status() {
-    echo -e "\n${Blue}=== WireGuard服务状态 ===${Font}"
-    # 检查接口是否运行（兼容systemd和手动启动）
-    if wg show ${WG_INTERFACE} &> /dev/null; then
-        echo -e "${Green}服务状态: 运行中${Font}"
-        echo -e "\n${Blue}=== 接口信息 ===${Font}"
-        wg show
-        echo -e "\n${Blue}=== 连接统计 ===${Font}"
-        wg show ${WG_INTERFACE} dump
-    else
-        echo -e "${Red}服务状态: 未运行${Font}"
+    echo -e "\n${Blue}=== WireGuard隧道状态总览 ===${Font}"
+
+    # 检查是否有隧道
+    local tunnel_count=0
+    local running_count=0
+
+    for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+        [[ -f "$tunnel_info" ]] || continue
+        tunnel_count=$((tunnel_count + 1))
+
+        source "$tunnel_info"
+
+        echo -e "\n${Blue}=== 隧道: $TUNNEL_NAME ===${Font}"
+        echo "接口: $WG_INTERFACE"
+        echo "端口: $WG_PORT"
+        echo "网段: $WG_NETWORK"
+        echo "公网地址: $PUBLIC_IP:$WG_PORT"
+
+        # 检查接口是否运行
+        if wg show "$WG_INTERFACE" &>/dev/null; then
+            echo -e "状态: ${Green}运行中${Font}"
+            running_count=$((running_count + 1))
+
+            echo -e "\n${Blue}=== 接口详情 ===${Font}"
+            wg show "$WG_INTERFACE"
+
+            echo -e "\n${Blue}=== 连接统计 ===${Font}"
+            wg show "$WG_INTERFACE" dump
+        else
+            echo -e "状态: ${Red}未运行${Font}"
+        fi
+
+        # 显示客户端数量
+        local client_count=$(ls "${WG_CONFIG_DIR}/${TUNNEL_NAME}_"*.conf 2>/dev/null | wc -l)
+        echo "客户端数量: $client_count"
+    done
+
+    if [[ $tunnel_count -eq 0 ]]; then
+        echo "暂无WireGuard隧道"
+        return 1
     fi
 
-    if [[ -f "${WG_DIR}/server_info.conf" ]]; then
-        source "${WG_DIR}/server_info.conf"
-        echo -e "\n${Blue}=== 服务端信息 ===${Font}"
-        echo "公网地址: ${PUBLIC_IP}:${WG_PORT}"
-        echo "VPN网段: $WG_NETWORK"
-        echo "服务端IP: $WG_SERVER_IP"
-    fi
+    echo -e "\n${Blue}=== 总览 ===${Font}"
+    echo "总隧道数: $tunnel_count"
+    echo "运行中: $running_count"
+    echo "已停止: $((tunnel_count - running_count))"
 
     # 检查防火墙状态
     echo -e "\n${Blue}=== 防火墙状态 ===${Font}"
@@ -971,12 +1576,14 @@ show_status() {
 
 # 列出客户端配置
 list_clients() {
-    echo -e "\n${Blue}=== 客户端配置列表 ===${Font}"
-    if [[ -d "$WG_CONFIG_DIR" ]]; then
-        local configs=$(ls "$WG_CONFIG_DIR"/*.conf 2>/dev/null)
+    local tunnel_name=${1:-""}
+
+    if [[ -n "$tunnel_name" ]]; then
+        echo -e "\n${Blue}=== 隧道 $tunnel_name 的客户端配置 ===${Font}"
+        local configs=$(ls "${WG_CONFIG_DIR}/${tunnel_name}_"*.conf 2>/dev/null)
         if [[ -n "$configs" ]]; then
             for config in $configs; do
-                local name=$(basename "$config" .conf)
+                local name=$(basename "$config" .conf | sed "s/^${tunnel_name}_//")
                 local ip=$(grep "Address" "$config" | awk '{print $3}' | cut -d'/' -f1)
                 echo "- $name ($ip)"
             done
@@ -984,77 +1591,146 @@ list_clients() {
             echo "暂无客户端配置"
         fi
     else
-        echo "配置目录不存在"
+        echo -e "\n${Blue}=== 所有客户端配置 ===${Font}"
+        if [[ -d "$WG_CONFIG_DIR" ]]; then
+            local configs=$(ls "$WG_CONFIG_DIR"/*.conf 2>/dev/null)
+            if [[ -n "$configs" ]]; then
+                for config in $configs; do
+                    local full_name=$(basename "$config" .conf)
+                    local ip=$(grep "Address" "$config" | awk '{print $3}' | cut -d'/' -f1)
+
+                    # 尝试解析隧道名称和客户端名称
+                    if [[ "$full_name" =~ ^([^_]+)_(.+)$ ]]; then
+                        local tunnel="${BASH_REMATCH[1]}"
+                        local client="${BASH_REMATCH[2]}"
+                        echo "- $client (隧道: $tunnel, IP: $ip)"
+                    else
+                        echo "- $full_name ($ip)"
+                    fi
+                done
+            else
+                echo "暂无客户端配置"
+            fi
+        else
+            echo "配置目录不存在"
+        fi
     fi
 }
 
 # 删除客户端配置
 delete_client() {
-    list_clients
+    # 选择隧道
+    if ! list_tunnels; then
+        ERROR "未找到可用隧道"
+        return 1
+    fi
+
+    if ! select_tunnel "请选择要删除客户端的隧道"; then
+        return 1
+    fi
+
+    local tunnel_name="$CURRENT_TUNNEL"
+
+    # 显示该隧道的客户端
+    list_clients "$tunnel_name"
+
     echo
     read -p "请输入要删除的客户端名称: " client_name
-    
+
     if [[ -z "$client_name" ]]; then
         ERROR "客户端名称不能为空"
         return 1
     fi
-    
-    local config_file="${WG_CONFIG_DIR}/${client_name}.conf"
+
+    local config_file="${WG_CONFIG_DIR}/${tunnel_name}_${client_name}.conf"
     if [[ ! -f "$config_file" ]]; then
-        ERROR "客户端配置不存在: $client_name"
+        ERROR "客户端配置不存在: $client_name (隧道: $tunnel_name)"
         return 1
     fi
-    
-    read -p "确认删除客户端 $client_name? (y/N): " confirm
+
+    read -p "确认删除客户端 $client_name (隧道: $tunnel_name)? (y/N): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         return 1
     fi
-    
+
     # 删除配置文件
     rm -f "$config_file"
-    
+
     # 删除密钥文件
-    rm -f "${WG_KEYS_DIR}/${client_name}_private.key"
-    rm -f "${WG_KEYS_DIR}/${client_name}_public.key"
-    
+    rm -f "${WG_KEYS_DIR}/${tunnel_name}_${client_name}_private.key"
+    rm -f "${WG_KEYS_DIR}/${tunnel_name}_${client_name}_public.key"
+
     # 从服务端配置中删除客户端
     if [[ -f "${WG_DIR}/${WG_INTERFACE}.conf" ]]; then
-        sed -i "/# Client: $client_name/,/^$/d" "${WG_DIR}/${WG_INTERFACE}.conf"
+        sed -i "/# Client: ${tunnel_name}_${client_name}/,/^$/d" "${WG_DIR}/${WG_INTERFACE}.conf"
     fi
-    
-    INFO "客户端 $client_name 已删除"
-    
+
+    INFO "客户端 $client_name 已从隧道 $tunnel_name 中删除"
+
     # 重启服务以应用更改
-    if systemctl is-active --quiet wg-quick@${WG_INTERFACE}; then
-        systemctl restart wg-quick@${WG_INTERFACE}
+    if wg show "$WG_INTERFACE" &>/dev/null; then
+        case $SERVICE_MANAGER in
+            "systemd")
+                if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
+                    systemctl restart wg-quick@${WG_INTERFACE}
+                else
+                    wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf"
+                    wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                fi
+                ;;
+            *)
+                wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf"
+                wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                ;;
+        esac
         INFO "WireGuard服务已重启"
     fi
 }
 
 # 显示客户端配置
 show_client_config() {
-    list_clients
+    # 选择隧道
+    if ! list_tunnels; then
+        ERROR "未找到可用隧道"
+        return 1
+    fi
+
+    if ! select_tunnel "请选择要查看客户端的隧道"; then
+        return 1
+    fi
+
+    local tunnel_name="$CURRENT_TUNNEL"
+
+    # 显示该隧道的客户端
+    list_clients "$tunnel_name"
+
     echo
     read -p "请输入要查看的客户端名称: " client_name
-    
+
     if [[ -z "$client_name" ]]; then
         ERROR "客户端名称不能为空"
         return 1
     fi
-    
-    local config_file="${WG_CONFIG_DIR}/${client_name}.conf"
+
+    local config_file="${WG_CONFIG_DIR}/${tunnel_name}_${client_name}.conf"
     if [[ ! -f "$config_file" ]]; then
-        ERROR "客户端配置不存在: $client_name"
+        ERROR "客户端配置不存在: $client_name (隧道: $tunnel_name)"
         return 1
     fi
-    
-    echo -e "\n${Blue}=== 客户端配置: $client_name ===${Font}"
+
+    echo -e "\n${Blue}=== 客户端配置: $client_name (隧道: $tunnel_name) ===${Font}"
     cat "$config_file"
-    
-    echo -e "\n${Blue}=== 二维码生成 ===${Font}"
-    echo "可以将上述配置内容复制到以下在线工具生成二维码："
-    echo "https://www.qr-code-generator.com/"
-    echo "https://qr.io/"
+
+    # 生成二维码（如果支持）
+    if command -v qrencode &> /dev/null; then
+        echo -e "\n${Blue}=== 配置二维码 ===${Font}"
+        qrencode -t ansiutf8 < "$config_file"
+    else
+        echo -e "\n${Blue}=== 二维码生成 ===${Font}"
+        echo "可以将上述配置内容复制到以下在线工具生成二维码："
+        echo "https://www.qr-code-generator.com/"
+        echo "https://qr.io/"
+    fi
 }
 
 # 卸载WireGuard
@@ -1064,14 +1740,14 @@ uninstall_wireguard() {
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         return 1
     fi
-    
+
     # 停止服务
     systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null
     systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null
-    
+
     # 删除配置文件
     rm -rf "$WG_DIR"
-    
+
     # 卸载软件包
     case $OS in
         ubuntu|debian)
@@ -1084,7 +1760,7 @@ uninstall_wireguard() {
             $PACKAGE_MANAGER del wireguard-tools
             ;;
     esac
-    
+
     INFO "WireGuard已完全卸载"
 }
 
@@ -1092,20 +1768,21 @@ uninstall_wireguard() {
 main_menu() {
     while true; do
         clear
-        echo -e "———————————————————————————————————— \033[1;33mWireGuard 管理工具\033[0m —————————————————————————————————"
+        echo -e "———————————————————————————————————— \033[1;33mWireGuard 多隧道管理工具\033[0m —————————————————————————————————"
         echo -e "\n"
-        echo -e "\033[1;32m1、安装WireGuard服务端\033[0m"
+        echo -e "\033[1;32m1、安装/创建WireGuard隧道\033[0m"
         echo -e "\033[1;32m2、生成客户端配置\033[0m"
-        echo -e "\033[1;32m3、查看服务状态\033[0m"
+        echo -e "\033[1;32m3、查看隧道状态\033[0m"
         echo -e "\033[1;32m4、查看客户端配置\033[0m"
         echo -e "\033[1;32m5、删除客户端配置\033[0m"
-        echo -e "\033[1;32m6、启动WireGuard服务\033[0m"
-        echo -e "\033[1;32m7、停止WireGuard服务\033[0m"
-        echo -e "\033[1;32m8、卸载WireGuard\033[0m"
+        echo -e "\033[1;32m6、启动WireGuard隧道\033[0m"
+        echo -e "\033[1;32m7、停止WireGuard隧道\033[0m"
+        echo -e "\033[1;32m8、隧道管理\033[0m"
+        echo -e "\033[1;32m9、卸载WireGuard\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
-        read -p "请输入您的选择（1-8，按q退出）：" choice
-        
+        read -p "请输入您的选择（1-9，按q退出）：" choice
+
         case "$choice" in
             1)
                 detect_os
@@ -1130,12 +1807,15 @@ main_menu() {
                 delete_client
                 ;;
             6)
-                start_wireguard
+                start_wireguard_menu
                 ;;
             7)
-                stop_wireguard
+                stop_wireguard_menu
                 ;;
             8)
+                tunnel_management_menu
+                ;;
+            9)
                 uninstall_wireguard
                 ;;
             [Qq])
@@ -1147,7 +1827,78 @@ main_menu() {
                 continue
                 ;;
         esac
-        
+
+        echo
+        read -n 1 -p "按任意键继续..."
+    done
+}
+
+# 启动WireGuard隧道菜单
+start_wireguard_menu() {
+    if ! list_tunnels; then
+        ERROR "未找到可用隧道，请先创建隧道"
+        return 1
+    fi
+
+    if ! select_tunnel "请选择要启动的隧道"; then
+        return 1
+    fi
+
+    start_wireguard
+}
+
+# 停止WireGuard隧道菜单
+stop_wireguard_menu() {
+    if ! list_tunnels; then
+        ERROR "未找到可用隧道"
+        return 1
+    fi
+
+    if ! select_tunnel "请选择要停止的隧道"; then
+        return 1
+    fi
+
+    stop_wireguard
+}
+
+# 隧道管理菜单
+tunnel_management_menu() {
+    while true; do
+        clear
+        echo -e "———————————————————————————————————— \033[1;33mWireGuard 隧道管理\033[0m —————————————————————————————————"
+        echo -e "\n"
+        echo -e "\033[1;32m1、查看所有隧道\033[0m"
+        echo -e "\033[1;32m2、查看隧道详细信息\033[0m"
+        echo -e "\033[1;32m3、删除隧道\033[0m"
+        echo -e "\033[1;32m4、查看所有客户端\033[0m"
+        echo -e "\033[1;32m5、返回主菜单\033[0m"
+        echo -e "\n"
+        echo -e "——————————————————————————————————————————————————————————————————————————————————"
+        read -p "请输入您的选择（1-5）：" choice
+
+        case "$choice" in
+            1)
+                list_tunnels || echo "暂无隧道"
+                ;;
+            2)
+                show_tunnel_details
+                ;;
+            3)
+                delete_tunnel
+                ;;
+            4)
+                list_clients
+                ;;
+            5)
+                return 0
+                ;;
+            *)
+                ERROR "输入错误，按任意键重新输入！"
+                read -r -n 1
+                continue
+                ;;
+        esac
+
         echo
         read -n 1 -p "按任意键继续..."
     done
@@ -1279,116 +2030,7 @@ configure_firewall() {
     esac
 }
 
-# 检测防火墙系统
-detect_firewall() {
-    FIREWALL_TYPE="none"
 
-    # 检测UFW
-    if command -v ufw &> /dev/null; then
-        if ufw status | grep -q "Status: active"; then
-            FIREWALL_TYPE="ufw"
-            INFO "检测到活跃的UFW防火墙"
-        else
-            INFO "检测到UFW但未启用"
-        fi
-    # 检测firewalld
-    elif command -v firewall-cmd &> /dev/null; then
-        if systemctl is-active --quiet firewalld; then
-            FIREWALL_TYPE="firewalld"
-            INFO "检测到活跃的firewalld防火墙"
-        else
-            INFO "检测到firewalld但未启用"
-        fi
-    # 检测iptables
-    elif command -v iptables &> /dev/null; then
-        # 检查是否有自定义iptables规则
-        if iptables -L | grep -q "Chain INPUT (policy DROP)" || iptables -L INPUT | grep -v "ACCEPT.*0.0.0.0/0" | grep -q "ACCEPT\|DROP\|REJECT"; then
-            FIREWALL_TYPE="iptables"
-            INFO "检测到自定义iptables规则"
-        else
-            INFO "检测到iptables但无严格规则"
-        fi
-    else
-        WARN "未检测到防火墙系统"
-    fi
-
-    INFO "防火墙类型: $FIREWALL_TYPE"
-}
-
-# 配置防火墙规则
-configure_firewall() {
-    if [[ "$FIREWALL_TYPE" == "none" ]]; then
-        INFO "无需配置防火墙规则"
-        return 0
-    fi
-
-    INFO "配置防火墙规则..."
-
-    case "$FIREWALL_TYPE" in
-        "ufw")
-            # UFW配置
-            INFO "配置UFW防火墙规则"
-
-            # 允许WireGuard端口
-            ufw allow ${WG_PORT}/udp comment "WireGuard"
-
-            # 配置转发规则
-            ufw route allow in on ${WG_INTERFACE}
-            ufw route allow out on ${WG_INTERFACE}
-
-            # 重新加载UFW
-            ufw reload
-
-            INFO "UFW防火墙配置完成"
-            ;;
-
-        "firewalld")
-            # firewalld配置
-            INFO "配置firewalld防火墙规则"
-
-            # 允许WireGuard端口
-            firewall-cmd --permanent --add-port=${WG_PORT}/udp
-
-            # 添加WireGuard接口到trusted区域
-            firewall-cmd --permanent --zone=trusted --add-interface=${WG_INTERFACE}
-
-            # 启用伪装（NAT）
-            firewall-cmd --permanent --add-masquerade
-
-            # 重新加载配置
-            firewall-cmd --reload
-
-            INFO "firewalld防火墙配置完成"
-            ;;
-
-        "iptables")
-            # iptables配置
-            INFO "配置iptables防火墙规则"
-
-            # 允许WireGuard端口
-            iptables -A INPUT -p udp --dport ${WG_PORT} -j ACCEPT
-
-            # 保存iptables规则（根据不同发行版）
-            if command -v iptables-save &> /dev/null; then
-                if [[ -f /etc/iptables/rules.v4 ]]; then
-                    iptables-save > /etc/iptables/rules.v4
-                elif [[ -f /etc/sysconfig/iptables ]]; then
-                    iptables-save > /etc/sysconfig/iptables
-                else
-                    WARN "无法自动保存iptables规则，请手动保存"
-                fi
-            fi
-
-            INFO "iptables防火墙配置完成"
-            ;;
-
-        *)
-            WARN "未知防火墙类型，请手动配置以下规则："
-            echo "- 允许UDP端口 ${WG_PORT}"
-            echo "- 允许${WG_INTERFACE}接口的转发流量"
-            ;;
-    esac
-}
 
 # 脚本入口
 check_root
