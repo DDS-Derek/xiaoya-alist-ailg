@@ -1484,6 +1484,28 @@ generate_client_config() {
         allowed_ips="0.0.0.0/0"
     fi
 
+    # 询问是否允许其他节点访问当前节点的宿主机局域网
+    echo -e "\n${Blue}=== 局域网访问配置 ===${Font}"
+    echo "是否允许其他VPN节点访问当前节点所属的宿主机局域网？"
+    echo "${Yellow}建议在24小时开机的Linux设备（如路由器/NAS）上启用${Font}"
+    echo "启用后，其他VPN客户端可以通过此节点访问其宿主机的局域网设备"
+    read -p "是否启用局域网访问? (y/N): " enable_lan_access
+
+    local client_lan_network=""
+    if [[ "$enable_lan_access" =~ ^[Yy]$ ]]; then
+        echo -e "\n请输入当前节点宿主机的局域网段："
+        echo "格式示例: 192.168.1.0/24, 192.168.3.0/24, 10.0.0.0/24"
+        read -p "局域网段: " client_lan_network
+
+        # 验证网段格式
+        if [[ ! "$client_lan_network" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+            WARN "无效的网段格式，跳过局域网访问配置"
+            client_lan_network=""
+        else
+            INFO "将允许其他VPN节点访问局域网段: $client_lan_network"
+        fi
+    fi
+
     # 询问DNS配置
     read -p "DNS服务器 [默认: 8.8.8.8,1.1.1.1]: " custom_dns
     local dns_servers=${custom_dns:-"8.8.8.8,1.1.1.1"}
@@ -1502,17 +1524,25 @@ DNS = $dns_servers
 PublicKey = $server_public
 Endpoint = $PUBLIC_IP:$WG_PORT
 AllowedIPs = $allowed_ips
-PersistentKeepalive = 25
+PersistentKeepalive = 15
 EOF
 
     # 添加客户端到服务端配置
     local client_public=$(cat "${WG_KEYS_DIR}/${tunnel_name}_${client_name}_public.key")
+
+    # 设置服务端的AllowedIPs
+    local server_allowed_ips="$client_ip/32"
+    if [[ -n "$client_lan_network" ]]; then
+        server_allowed_ips="$client_ip/32,$client_lan_network"
+        INFO "服务端将允许访问客户端局域网: $client_lan_network"
+    fi
+
     cat >> "${WG_DIR}/${WG_INTERFACE}.conf" << EOF
 
 # Client: ${tunnel_name}_${client_name}
 [Peer]
 PublicKey = $client_public
-AllowedIPs = $client_ip/32
+AllowedIPs = $server_allowed_ips
 EOF
 
     INFO "客户端配置生成完成: $client_config_file"
