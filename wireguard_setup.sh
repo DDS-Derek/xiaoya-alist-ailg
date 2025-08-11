@@ -1140,6 +1140,7 @@ setup_server() {
                 fi
                 INFO "重置隧道: $CURRENT_TUNNEL"
                 reset_tunnel "$CURRENT_TUNNEL"
+                return  # 重置完成后直接返回，避免重复调用
                 ;;
             3)
                 INFO "操作已取消"
@@ -1154,11 +1155,6 @@ setup_server() {
         INFO "未检测到现有隧道，创建第一个隧道"
         setup_new_tunnel
         return
-    fi
-
-    # 如果是重置现有隧道，继续使用现有配置
-    if [[ -n "$CURRENT_TUNNEL" ]]; then
-        configure_tunnel_server "$CURRENT_TUNNEL"
     fi
 }
 
@@ -1871,8 +1867,10 @@ list_clients() {
                 local ip=$(grep "Address" "$config" | awk '{print $3}' | cut -d'/' -f1)
                 echo "- $name ($ip)"
             done
+            return 0  # 有客户端配置
         else
             echo "暂无客户端配置"
+            return 1  # 无客户端配置
         fi
     else
         echo -e "\n${Blue}=== 所有客户端配置 ===${Font}"
@@ -1894,10 +1892,13 @@ list_clients() {
                 done
             else
                 echo "暂无客户端配置"
+                return 1  # 无客户端配置
             fi
         else
             echo "配置目录不存在"
+            return 1  # 目录不存在
         fi
+        return 0  # 有客户端配置
     fi
 }
 
@@ -1912,7 +1913,10 @@ delete_client() {
     local tunnel_name="$CURRENT_TUNNEL"
 
     # 显示该隧道的客户端
-    list_clients "$tunnel_name"
+    if ! list_clients "$tunnel_name"; then
+        INFO "该隧道暂无客户端配置，无法删除"
+        return 1
+    fi
 
     echo
     read -p "请输入要删除的客户端名称: " client_name
@@ -1993,7 +1997,10 @@ show_client_config() {
     local tunnel_name="$CURRENT_TUNNEL"
 
     # 显示该隧道的客户端
-    list_clients "$tunnel_name"
+    if ! list_clients "$tunnel_name"; then
+        INFO "该隧道暂无客户端配置，请先生成客户端配置"
+        return 1
+    fi
 
     echo
     read -p "请输入要查看的客户端名称: " client_name
