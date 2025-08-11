@@ -102,9 +102,9 @@ configure_install_path() {
         echo -e "${Yellow}检测到Unraid系统${Font}"
         echo "推荐路径: /mnt/user/appdata/wireguard"
         echo "默认路径: /etc/wireguard"
-    elif grep -qi "fnos\|飞牛" /etc/os-release 2>/dev/null; then
+    elif ps x | grep -q "/usr/trim/bin/trim$" 2>/dev/null; then
         echo -e "${Yellow}检测到飞牛OS系统${Font}"
-        echo "推荐路径: /mnt/data/wireguard 或 /opt/wireguard"
+        echo "推荐路径: /vol1/1000/wireguard"
         echo "默认路径: /etc/wireguard"
     else
         echo "当前系统: $(uname -s)"
