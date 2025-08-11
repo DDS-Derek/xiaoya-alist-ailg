@@ -495,6 +495,15 @@ get_network_interface() {
 
 # 安装WireGuard
 install_wireguard() {
+    # 检查WireGuard是否已安装
+    if command -v wg &> /dev/null && command -v wg-quick &> /dev/null; then
+        INFO "WireGuard已安装，跳过安装步骤"
+        # 仍然尝试安装qrencode
+        INFO "检查qrencode工具..."
+        install_qrencode
+        return 0
+    fi
+
     INFO "开始安装WireGuard..."
 
     case $PACKAGE_MANAGER in
@@ -542,38 +551,92 @@ install_wireguard() {
     fi
 
     INFO "WireGuard安装成功"
+
+    # 自动尝试安装qrencode
+    INFO "尝试安装qrencode以支持二维码功能..."
+    install_qrencode
+
     return 0
 }
 
 # 安装qrencode（可选）
 install_qrencode() {
-    INFO "尝试安装qrencode用于生成二维码..."
+    # 检查是否已安装
+    if command -v qrencode &> /dev/null; then
+        INFO "qrencode已安装，支持二维码功能"
+        return 0
+    fi
+
+    INFO "正在安装qrencode用于生成二维码..."
 
     case $PACKAGE_MANAGER in
         "apt-get")
-            apt-get install -y qrencode 2>/dev/null || WARN "qrencode安装失败，将跳过二维码功能"
+            if apt-get install -y qrencode 2>/dev/null; then
+                INFO "qrencode安装成功"
+                return 0
+            else
+                WARN "qrencode安装失败，将使用在线二维码工具"
+                return 1
+            fi
             ;;
         "yum")
-            yum install -y qrencode 2>/dev/null || WARN "qrencode安装失败，将跳过二维码功能"
+            if yum install -y qrencode 2>/dev/null; then
+                INFO "qrencode安装成功"
+                return 0
+            else
+                WARN "qrencode安装失败，将使用在线二维码工具"
+                return 1
+            fi
             ;;
         "dnf")
-            dnf install -y qrencode 2>/dev/null || WARN "qrencode安装失败，将跳过二维码功能"
+            if dnf install -y qrencode 2>/dev/null; then
+                INFO "qrencode安装成功"
+                return 0
+            else
+                WARN "qrencode安装失败，将使用在线二维码工具"
+                return 1
+            fi
             ;;
         "zypper")
-            zypper install -y qrencode 2>/dev/null || WARN "qrencode安装失败，将跳过二维码功能"
+            if zypper install -y qrencode 2>/dev/null; then
+                INFO "qrencode安装成功"
+                return 0
+            else
+                WARN "qrencode安装失败，将使用在线二维码工具"
+                return 1
+            fi
             ;;
         "pacman")
-            pacman -S --noconfirm qrencode 2>/dev/null || WARN "qrencode安装失败，将跳过二维码功能"
+            if pacman -S --noconfirm qrencode 2>/dev/null; then
+                INFO "qrencode安装成功"
+                return 0
+            else
+                WARN "qrencode安装失败，将使用在线二维码工具"
+                return 1
+            fi
             ;;
         "apk")
-            apk add --no-cache libqrencode 2>/dev/null || WARN "qrencode安装失败，将跳过二维码功能"
+            if apk add --no-cache libqrencode 2>/dev/null; then
+                INFO "qrencode安装成功"
+                return 0
+            else
+                WARN "qrencode安装失败，将使用在线二维码工具"
+                return 1
+            fi
             ;;
         "opkg")
             # OpenWrt系统的qrencode包名可能不同
-            opkg install qrencode 2>/dev/null || WARN "qrencode安装失败，将跳过二维码功能"
+            if opkg install qrencode 2>/dev/null; then
+                INFO "qrencode安装成功"
+                return 0
+            else
+                WARN "qrencode安装失败，将使用在线二维码工具"
+                return 1
+            fi
             ;;
         *)
-            WARN "未知包管理器，跳过qrencode安装"
+            WARN "未知包管理器，无法自动安装qrencode"
+            return 1
             ;;
     esac
 }
@@ -639,6 +702,52 @@ ensure_curl() {
 
 ensure_qrencode() {
     command -v qrencode >/dev/null 2>&1 || install_qrencode || true
+}
+
+# 显示配置二维码
+show_qrcode() {
+    local config_file="$1"
+    local config_name="$2"
+
+    if [[ ! -f "$config_file" ]]; then
+        ERROR "配置文件不存在: $config_file"
+        return 1
+    fi
+
+    echo -e "\n${Blue}=== 配置二维码: $config_name ===${Font}"
+
+    if command -v qrencode &> /dev/null; then
+        INFO "使用qrencode生成二维码"
+        echo
+        # 使用中号大小：模块大小2，边距2 - 平衡显示效果和扫描便利性
+        qrencode -t ansiutf8 -s 2 -m 2 < "$config_file"
+        echo
+        echo -e "${Yellow}提示：可以使用WireGuard客户端扫描上方二维码快速导入配置${Font}"
+        echo -e "${Yellow}支持的客户端：WireGuard官方客户端、TunSafe等${Font}"
+    else
+        WARN "qrencode未安装，提供替代方案"
+        echo
+        echo -e "${Yellow}方案1：在线二维码生成工具${Font}"
+        echo "请将配置内容复制到以下在线工具生成二维码："
+        echo "• https://www.qr-code-generator.com/"
+        echo "• https://qr.io/"
+        echo "• https://qrcode.show/"
+        echo
+        echo -e "${Yellow}方案2：安装qrencode工具${Font}"
+        echo "安装命令："
+        case $PACKAGE_MANAGER in
+            "apt-get") echo "  sudo apt-get install qrencode" ;;
+            "yum") echo "  sudo yum install qrencode" ;;
+            "dnf") echo "  sudo dnf install qrencode" ;;
+            "zypper") echo "  sudo zypper install qrencode" ;;
+            "pacman") echo "  sudo pacman -S qrencode" ;;
+            "apk") echo "  sudo apk add libqrencode" ;;
+            "opkg") echo "  sudo opkg install qrencode" ;;
+            *) echo "  请根据您的系统包管理器安装qrencode" ;;
+        esac
+        echo
+        echo -e "${Yellow}安装后重新运行脚本即可使用二维码功能${Font}"
+    fi
 }
 
 
@@ -966,6 +1075,27 @@ reset_tunnel() {
     rm -f "${WG_KEYS_DIR}/${tunnel_name}_"*.key
 
     INFO "隧道 $tunnel_name 已重置，开始重新配置..."
+
+    # 重新分配接口、端口和网段（就像创建新隧道一样）
+    WG_INTERFACE=$(get_next_interface)
+    WG_PORT=$(get_next_port)
+    WG_NETWORK=$(get_next_network)
+    WG_SERVER_IP=$(echo $WG_NETWORK | sed 's/0\/24/1/')
+    CURRENT_TUNNEL="$tunnel_name"
+
+    INFO "重置后的隧道配置:"
+    INFO "隧道名称: $tunnel_name"
+    INFO "接口名称: $WG_INTERFACE"
+    INFO "监听端口: $WG_PORT"
+    INFO "VPN网段: $WG_NETWORK"
+    INFO "服务端IP: $WG_SERVER_IP"
+
+    # 询问是否自定义配置
+    echo
+    read -p "是否自定义配置? (y/N): " customize
+    if [[ "$customize" =~ ^[Yy]$ ]]; then
+        customize_tunnel_config
+    fi
 
     # 重新配置隧道
     configure_tunnel_server "$tunnel_name"
@@ -1396,16 +1526,41 @@ EOF
     echo -e "\n${Blue}=== 客户端配置文件内容 ===${Font}"
     cat "$client_config_file"
 
-    # 生成二维码（如果支持）
-    if command -v qrencode &> /dev/null; then
-        echo -e "\n${Blue}=== 配置二维码 ===${Font}"
-        qrencode -t ansiutf8 < "$client_config_file"
-    fi
+    # 显示二维码
+    show_qrcode "$client_config_file" "${tunnel_name}_${client_name}"
 
     # 重启WireGuard服务以应用新配置
-    if systemctl is-active --quiet wg-quick@${WG_INTERFACE}; then
-        systemctl restart wg-quick@${WG_INTERFACE}
-        INFO "WireGuard服务已重启"
+    if wg show "$WG_INTERFACE" &>/dev/null; then
+        INFO "重启WireGuard接口以应用新客户端配置..."
+        case $SERVICE_MANAGER in
+            "systemd")
+                if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
+                    # 使用默认路径，可以使用systemd服务
+                    if systemctl is-active --quiet wg-quick@${WG_INTERFACE}; then
+                        systemctl restart wg-quick@${WG_INTERFACE}
+                        INFO "WireGuard systemd服务已重启"
+                    else
+                        WARN "systemd服务未运行，尝试手动重启接口"
+                        wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
+                        wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                        INFO "WireGuard接口已重启"
+                    fi
+                else
+                    # 使用自定义路径，手动重启
+                    wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
+                    wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                    INFO "WireGuard接口已重启"
+                fi
+                ;;
+            *)
+                # 其他服务管理器或手动管理
+                wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
+                wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                INFO "WireGuard接口已重启"
+                ;;
+        esac
+    else
+        INFO "WireGuard接口未运行，新客户端配置将在下次启动时生效"
     fi
 }
 
@@ -1794,21 +1949,36 @@ delete_client() {
 
     # 重启服务以应用更改
     if wg show "$WG_INTERFACE" &>/dev/null; then
+        INFO "重启WireGuard接口以应用客户端删除..."
         case $SERVICE_MANAGER in
             "systemd")
                 if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
-                    systemctl restart wg-quick@${WG_INTERFACE}
+                    # 使用默认路径，可以使用systemd服务
+                    if systemctl is-active --quiet wg-quick@${WG_INTERFACE}; then
+                        systemctl restart wg-quick@${WG_INTERFACE}
+                        INFO "WireGuard systemd服务已重启"
+                    else
+                        WARN "systemd服务未运行，尝试手动重启接口"
+                        wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
+                        wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                        INFO "WireGuard接口已重启"
+                    fi
                 else
-                    wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf"
+                    # 使用自定义路径，手动重启
+                    wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
                     wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                    INFO "WireGuard接口已重启"
                 fi
                 ;;
             *)
-                wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf"
+                # 其他服务管理器或手动管理
+                wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
                 wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                INFO "WireGuard接口已重启"
                 ;;
         esac
-        INFO "WireGuard服务已重启"
+    else
+        INFO "WireGuard接口未运行，客户端删除已完成"
     fi
 }
 
@@ -1842,16 +2012,8 @@ show_client_config() {
     echo -e "\n${Blue}=== 客户端配置: $client_name (隧道: $tunnel_name) ===${Font}"
     cat "$config_file"
 
-    # 生成二维码（如果支持）
-    if command -v qrencode &> /dev/null; then
-        echo -e "\n${Blue}=== 配置二维码 ===${Font}"
-        qrencode -t ansiutf8 < "$config_file"
-    else
-        echo -e "\n${Blue}=== 二维码生成 ===${Font}"
-        echo "可以将上述配置内容复制到以下在线工具生成二维码："
-        echo "https://www.qr-code-generator.com/"
-        echo "https://qr.io/"
-    fi
+    # 显示二维码
+    show_qrcode "$config_file" "${tunnel_name}_${client_name}"
 }
 
 # 卸载WireGuard
@@ -1903,7 +2065,7 @@ main_menu() {
         clear
         echo -e "———————————————————————————————————— \033[1;33mWireGuard 多隧道管理工具\033[0m —————————————————————————————————"
         echo -e "\n"
-        echo -e "\033[1;32m1、安装/创建WireGuard隧道\033[0m"
+        echo -e "\033[1;32m1、安装WireGuard/创建隧道\033[0m"
         echo -e "\033[1;32m2、生成客户端配置\033[0m"
         echo -e "\033[1;32m3、查看隧道状态\033[0m"
         echo -e "\033[1;32m4、查看客户端配置\033[0m"
@@ -1918,15 +2080,27 @@ main_menu() {
 
         case "$choice" in
             1)
-                detect_os
-                configure_install_path
-                detect_service_manager
-                detect_firewall
-                detect_startup_method
-                install_wireguard
-                setup_server
-                configure_firewall
-                start_wireguard
+                # 检查WireGuard是否已安装
+                if command -v wg &> /dev/null && command -v wg-quick &> /dev/null; then
+                    INFO "WireGuard已安装，直接创建隧道"
+                    detect_service_manager
+                    detect_firewall
+                    detect_startup_method
+                    setup_server
+                    configure_firewall
+                    start_wireguard
+                else
+                    INFO "WireGuard未安装，开始完整安装流程"
+                    detect_os
+                    configure_install_path
+                    detect_service_manager
+                    detect_firewall
+                    detect_startup_method
+                    install_wireguard
+                    setup_server
+                    configure_firewall
+                    start_wireguard
+                fi
                 ;;
             2)
                 generate_client_config
@@ -1948,6 +2122,7 @@ main_menu() {
                 ;;
             8)
                 tunnel_management_menu
+                continue  # 从子菜单返回后直接继续，不显示"按任意键继续"
                 ;;
             9)
                 uninstall_wireguard
@@ -2029,6 +2204,7 @@ tunnel_management_menu() {
                 ;;
         esac
 
+        # 执行完操作后暂停，等待用户确认（返回主菜单选项已经return，不会执行到这里）
         echo
         read -n 1 -p "按任意键继续..."
     done
@@ -2164,14 +2340,58 @@ configure_firewall() {
 
 # 检测现有WireGuard配置路径
 detect_existing_config() {
-    # 检查常见的WireGuard配置路径
+    # 首先检查是否有正在运行的WireGuard接口
+    local running_interfaces=()
+    if command -v wg &> /dev/null; then
+        while IFS= read -r interface; do
+            [[ -n "$interface" ]] && running_interfaces+=("$interface")
+        done < <(wg show interfaces 2>/dev/null)
+    fi
+
+    # 如果有运行中的接口，尝试找到其配置文件路径
+    if [[ ${#running_interfaces[@]} -gt 0 ]]; then
+        INFO "检测到正在运行的WireGuard接口: ${running_interfaces[*]}"
+
+        # 尝试找到配置文件路径
+        for interface in "${running_interfaces[@]}"; do
+            # 检查常见路径
+            local config_paths=(
+                "/etc/wireguard/${interface}.conf"
+                "/opt/wireguard/${interface}.conf"
+                "/volume1/docker/wireguard/${interface}.conf"
+                "/volume1/@appstore/wireguard/${interface}.conf"
+                "/mnt/user/appdata/wireguard/${interface}.conf"
+                "/vol1/1000/wireguard/${interface}.conf"
+            )
+
+            for config_path in "${config_paths[@]}"; do
+                if [[ -f "$config_path" ]]; then
+                    local detected_dir=$(dirname "$config_path")
+                    INFO "检测到运行中的WireGuard配置: $detected_dir"
+                    echo -e "${Yellow}当前WireGuard正在运行，建议使用现有配置目录${Font}"
+                    read -p "是否使用现有配置目录 $detected_dir? (Y/n): " use_running
+                    if [[ ! "$use_running" =~ ^[Nn]$ ]]; then
+                        WG_DIR="$detected_dir"
+                        WG_CONFIG_DIR="${WG_DIR}/configs"
+                        WG_KEYS_DIR="${WG_DIR}/keys"
+                        WG_TUNNELS_DIR="${WG_DIR}/tunnels"
+                        INFO "使用运行中的配置路径: $WG_DIR"
+                        return 0
+                    fi
+                    break
+                fi
+            done
+        done
+    fi
+
+    # 检查常见的WireGuard配置路径（即使没有运行中的接口）
     local common_paths=(
         "/etc/wireguard"
         "/opt/wireguard"
         "/volume1/docker/wireguard"
         "/volume1/@appstore/wireguard"
         "/mnt/user/appdata/wireguard"
-        "/mnt/data/wireguard"
+        "/vol1/1000/wireguard"
     )
 
     for path in "${common_paths[@]}"; do
@@ -2191,15 +2411,54 @@ detect_existing_config() {
     return 1
 }
 
+# 检查WireGuard运行状态
+check_wireguard_status() {
+    # 检查WireGuard是否已安装
+    if ! command -v wg &> /dev/null; then
+        INFO "WireGuard未安装，将在选择安装选项时进行安装"
+        return 1
+    fi
+
+    # 检查是否有运行中的接口
+    local running_interfaces
+    running_interfaces=$(wg show interfaces 2>/dev/null)
+
+    if [[ -n "$running_interfaces" ]]; then
+        INFO "检测到WireGuard已安装并运行中"
+        return 0
+    else
+        INFO "WireGuard已安装但未运行"
+        return 2
+    fi
+}
+
 # 脚本入口
 check_root
 
-# 检测现有配置，如果没有则进行路径配置
-if ! detect_existing_config; then
-    # 如果是第一次安装，在主菜单前先配置路径
-    if [[ ! -d "$WG_DIR" ]] || [[ -z "$(ls "$WG_DIR"/*.conf 2>/dev/null)" ]]; then
-        configure_install_path
-    fi
-fi
+# 检查WireGuard状态
+wg_status_code=0
+check_wireguard_status
+wg_status_code=$?
+
+case $wg_status_code in
+    0)
+        # WireGuard运行中，检测现有配置
+        if detect_existing_config; then
+            INFO "已加载现有WireGuard配置，直接进入管理界面"
+        else
+            WARN "检测到WireGuard运行但无法确定配置路径，使用默认路径"
+        fi
+        ;;
+    1)
+        # WireGuard未安装，首次使用时配置路径
+        INFO "首次使用，将在安装时配置路径"
+        ;;
+    2)
+        # WireGuard已安装但未运行，检测配置
+        if ! detect_existing_config; then
+            INFO "检测到WireGuard已安装，将在创建隧道时配置路径"
+        fi
+        ;;
+esac
 
 main_menu
