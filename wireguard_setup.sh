@@ -1846,7 +1846,7 @@ show_status() {
         "iptables")
             echo "iptables规则:"
             iptables -L INPUT -n | grep -q "${WG_PORT}" && echo "端口${WG_PORT}: 已开放" || echo "端口${WG_PORT}: 未开放"
-            iptables -L FORWARD -n | grep -q "${WG_INTERFACE}" && echo "转发规则: 已配置" || echo "转发规则: 未配置"
+            iptables -L FORWARD -n -v | grep -q "${WG_INTERFACE}" && echo "转发规则: 已配置" || echo "转发规则: 未配置"
             ;;
         *)
             echo "无防火墙或未检测到"
