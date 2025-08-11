@@ -1519,7 +1519,14 @@ generate_client_config() {
         fi
 
         while true; do
-            read -p "局域网段: " client_lan_network
+            read -p "局域网段 (输入 'n' 跳过): " client_lan_network
+
+            # 检查是否要跳过配置
+            if [[ "$client_lan_network" =~ ^[Nn]$ ]] || [[ -z "$client_lan_network" ]]; then
+                INFO "跳过局域网访问配置"
+                client_lan_network=""
+                break
+            fi
 
             # 验证网段格式
             if [[ ! "$client_lan_network" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
@@ -1531,7 +1538,7 @@ generate_client_config() {
             if [[ -n "$server_lan_network" ]] && [[ "$client_lan_network" == "$server_lan_network" ]]; then
                 ERROR "所填网段 $client_lan_network 属于服务端局域网！"
                 ERROR "如果客户端节点与服务端节点处于同一个局域网，无须填写此配置"
-                WARN "请填写不同的网段，或选择'N'跳过局域网访问配置"
+                WARN "请填写不同的网段，或输入 'n' 跳过局域网访问配置"
                 continue
             fi
 
