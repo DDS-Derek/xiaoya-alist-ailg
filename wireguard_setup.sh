@@ -33,6 +33,9 @@ WG_NETWORK="10.3.3.0/24"  # 当前操作的网段，动态设置
 WG_SERVER_IP="10.3.3.1"   # 当前操作的服务端IP，动态设置
 PUBLIC_IP=""
 CURRENT_TUNNEL=""   # 当前选择的隧道名称
+SERVICE_MANAGER=""  # 服务管理系统
+FIREWALL_TYPE=""    # 防火墙类型
+STARTUP_METHOD=""   # 开机自启动方式
 
 # 检测操作系统和包管理器
 detect_os() {
@@ -369,6 +372,10 @@ get_network_interface() {
     if [[ -z "$interface" ]]; then
         interface=$(ls /sys/class/net | grep -v lo | head -n1)
     fi
+    if [[ -z "$interface" ]]; then
+        ERROR "无法检测到网络接口"
+        return 1
+    fi
     echo "$interface"
 }
 
@@ -455,7 +462,7 @@ install_qrencode() {
             WARN "未知包管理器，跳过qrencode安装"
             ;;
     esac
-    }
+}
 
 
 # 通用依赖检查与安装
@@ -626,9 +633,16 @@ generate_keys() {
     local public_key="${WG_KEYS_DIR}/${tunnel_name}_${name}_public.key"
 
     if [[ ! -f "$private_key" ]]; then
-        wg genkey > "$private_key"
+        if ! wg genkey > "$private_key"; then
+            ERROR "生成私钥失败"
+            return 1
+        fi
         chmod 600 "$private_key"
-        wg pubkey < "$private_key" > "$public_key"
+        if ! wg pubkey < "$private_key" > "$public_key"; then
+            ERROR "生成公钥失败"
+            rm -f "$private_key"
+            return 1
+        fi
         chmod 644 "$public_key"
         INFO "生成密钥对: ${tunnel_name}_${name}"
     else
@@ -662,14 +676,6 @@ list_tunnels() {
         echo -e "   端口: $WG_PORT"
         echo -e "   网段: $WG_NETWORK"
         echo -e "   状态: ${color}${status_text}${Font}"
-        echo
-        continue
-
-        echo "$count. 隧道名称: $tunnel_name"
-        echo "   接口: $WG_INTERFACE"
-        echo "   端口: $WG_PORT"
-        echo "   网段: $WG_NETWORK"
-        echo "   状态: $status"
         echo
     done
 
@@ -927,7 +933,16 @@ configure_tunnel_server() {
 
     # 获取配置参数
     local public_ip="$PUBLIC_IP"
-    local network_interface=$(get_network_interface)
+    local network_interface
+    network_interface=$(get_network_interface)
+    if [[ $? -ne 0 ]] || [[ -z "$network_interface" ]]; then
+        ERROR "无法获取网络接口，请手动指定"
+        read -p "请输入网络接口名称 (如: eth0, ens33): " network_interface
+        if [[ -z "$network_interface" ]]; then
+            ERROR "网络接口不能为空"
+            return 1
+        fi
+    fi
 
     # 如果是新隧道，允许用户自定义网络接口
     if [[ -z "$CURRENT_TUNNEL" ]] || [[ "$CURRENT_TUNNEL" != "$tunnel_name" ]]; then
@@ -988,7 +1003,7 @@ configure_tunnel_server() {
     fi
 
     # 创建服务端配置文件
-    cat > "${WG_DIR}/${WG_INTERFACE}.conf" << EOF
+    if ! cat > "${WG_DIR}/${WG_INTERFACE}.conf" << EOF
 [Interface]
 PrivateKey = $server_private
 Address = $WG_SERVER_IP/24
@@ -998,6 +1013,10 @@ PostDown = $postdown_rules
 
 # 客户端配置将自动添加到此处
 EOF
+    then
+        ERROR "创建服务端配置文件失败"
+        return 1
+    fi
 
     # 保存隧道信息
     save_tunnel_info "$tunnel_name"
@@ -1056,10 +1075,6 @@ EOF
 
 # 删除隧道
 delete_tunnel() {
-    if ! list_tunnels; then
-        return 1
-    fi
-
     if ! select_tunnel "请选择要删除的隧道"; then
         return 1
     fi
@@ -1142,10 +1157,6 @@ remove_firewall_rules() {
 
 # 显示隧道详细信息
 show_tunnel_details() {
-    if ! list_tunnels; then
-        return 1
-    fi
-
     if ! select_tunnel "请选择要查看的隧道"; then
         return 1
     fi
@@ -1184,14 +1195,9 @@ show_tunnel_details() {
 
 # 生成客户端配置
 generate_client_config() {
-    # 检查是否有可用隧道
-    if ! list_tunnels; then
-        ERROR "未找到可用隧道，请先创建WireGuard服务端"
-        return 1
-    fi
-
-    # 选择隧道
+    # 选择隧道（select_tunnel内部会调用list_tunnels）
     if ! select_tunnel "请选择要添加客户端的隧道"; then
+        ERROR "未找到可用隧道，请先创建WireGuard服务端"
         return 1
     fi
 
@@ -1243,6 +1249,7 @@ generate_client_config() {
     local dns_servers=${custom_dns:-"8.8.8.8,1.1.1.1"}
 
     local client_private=$(cat "${WG_KEYS_DIR}/${tunnel_name}_${client_name}_private.key")
+    local server_public=$(cat "${WG_KEYS_DIR}/${tunnel_name}_server_public.key")
 
     # 生成客户端配置文件
     cat > "$client_config_file" << EOF
@@ -1252,7 +1259,7 @@ Address = $client_ip/32
 DNS = $dns_servers
 
 [Peer]
-PublicKey = $SERVER_PUBLIC_KEY
+PublicKey = $server_public
 Endpoint = $PUBLIC_IP:$WG_PORT
 AllowedIPs = $allowed_ips
 PersistentKeepalive = 25
@@ -1628,12 +1635,8 @@ list_clients() {
 # 删除客户端配置
 delete_client() {
     # 选择隧道
-    if ! list_tunnels; then
-        ERROR "未找到可用隧道"
-        return 1
-    fi
-
     if ! select_tunnel "请选择要删除客户端的隧道"; then
+        ERROR "未找到可用隧道"
         return 1
     fi
 
@@ -1698,12 +1701,8 @@ delete_client() {
 # 显示客户端配置
 show_client_config() {
     # 选择隧道
-    if ! list_tunnels; then
-        ERROR "未找到可用隧道"
-        return 1
-    fi
-
     if ! select_tunnel "请选择要查看客户端的隧道"; then
+        ERROR "未找到可用隧道"
         return 1
     fi
 
@@ -1757,15 +1756,27 @@ uninstall_wireguard() {
     rm -rf "$WG_DIR"
 
     # 卸载软件包
-    case $OS in
-        ubuntu|debian)
+    case $PACKAGE_MANAGER in
+        "apt-get")
             $PACKAGE_MANAGER remove -y wireguard wireguard-tools
             ;;
-        centos|rhel|fedora)
+        "yum"|"dnf")
             $PACKAGE_MANAGER remove -y wireguard-tools
             ;;
-        alpine)
+        "zypper")
+            $PACKAGE_MANAGER remove -y wireguard-tools
+            ;;
+        "pacman")
+            $PACKAGE_MANAGER -R --noconfirm wireguard-tools
+            ;;
+        "apk")
             $PACKAGE_MANAGER del wireguard-tools
+            ;;
+        "opkg")
+            $PACKAGE_MANAGER remove wireguard-tools
+            ;;
+        *)
+            WARN "未知包管理器，请手动卸载WireGuard"
             ;;
     esac
 
@@ -1843,12 +1854,8 @@ main_menu() {
 
 # 启动WireGuard隧道菜单
 start_wireguard_menu() {
-    if ! list_tunnels; then
-        ERROR "未找到可用隧道，请先创建隧道"
-        return 1
-    fi
-
     if ! select_tunnel "请选择要启动的隧道"; then
+        ERROR "未找到可用隧道，请先创建隧道"
         return 1
     fi
 
@@ -1857,12 +1864,8 @@ start_wireguard_menu() {
 
 # 停止WireGuard隧道菜单
 stop_wireguard_menu() {
-    if ! list_tunnels; then
-        ERROR "未找到可用隧道"
-        return 1
-    fi
-
     if ! select_tunnel "请选择要停止的隧道"; then
+        ERROR "未找到可用隧道"
         return 1
     fi
 
