@@ -89,6 +89,120 @@ check_root() {
     fi
 }
 
+# 配置安装路径
+configure_install_path() {
+    echo -e "\n${Blue}=== WireGuard安装路径配置 ===${Font}"
+
+    # 检测特殊系统并推荐路径
+    if [ -f /etc/synoinfo.conf ]; then
+        echo -e "${Yellow}检测到群晖系统${Font}"
+        echo "推荐路径: /volume1/docker/wireguard 或 /volume1/@appstore/wireguard"
+        echo "默认路径: /etc/wireguard"
+    elif [ -f /etc/unraid-version ]; then
+        echo -e "${Yellow}检测到Unraid系统${Font}"
+        echo "推荐路径: /mnt/user/appdata/wireguard"
+        echo "默认路径: /etc/wireguard"
+    elif grep -qi "fnos\|飞牛" /etc/os-release 2>/dev/null; then
+        echo -e "${Yellow}检测到飞牛OS系统${Font}"
+        echo "推荐路径: /mnt/data/wireguard 或 /opt/wireguard"
+        echo "默认路径: /etc/wireguard"
+    else
+        echo "当前系统: $(uname -s)"
+        echo "默认路径: /etc/wireguard"
+    fi
+
+    echo
+    echo "路径选择："
+    echo "1. 使用默认路径 (/etc/wireguard)"
+    echo "2. 自定义安装路径"
+    read -p "请选择 [1-2, 默认: 1]: " path_choice
+
+    if [[ "$path_choice" == "2" ]]; then
+        while true; do
+            read -p "请输入自定义安装路径 (如: /opt/wireguard): " custom_path
+
+            if [[ -z "$custom_path" ]]; then
+                ERROR "路径不能为空"
+                continue
+            fi
+
+            # 检查路径格式
+            if [[ ! "$custom_path" =~ ^/[a-zA-Z0-9/_.-]+$ ]]; then
+                ERROR "路径格式无效，请使用绝对路径"
+                continue
+            fi
+
+            # 检查是否有现有配置需要迁移
+            local old_wg_dir="$WG_DIR"
+            local has_existing_config=false
+
+            if [[ -d "$old_wg_dir" ]] && [[ -n "$(ls "$old_wg_dir"/*.conf 2>/dev/null)" ]]; then
+                has_existing_config=true
+            fi
+
+            # 检查路径是否可创建/访问
+            if ! mkdir -p "$custom_path" 2>/dev/null; then
+                ERROR "无法创建目录: $custom_path"
+                continue
+            fi
+
+            # 检查路径权限
+            if [[ ! -w "$custom_path" ]]; then
+                ERROR "目录无写入权限: $custom_path"
+                continue
+            fi
+
+            # 如果有现有配置，询问是否迁移
+            if [[ "$has_existing_config" == true ]] && [[ "$custom_path" != "$old_wg_dir" ]]; then
+                echo -e "\n${Yellow}检测到现有配置文件${Font}"
+                echo "原路径: $old_wg_dir"
+                echo "新路径: $custom_path"
+                read -p "是否迁移现有配置到新路径? (Y/n): " migrate_config
+
+                if [[ ! "$migrate_config" =~ ^[Nn]$ ]]; then
+                    INFO "迁移配置文件到新路径..."
+
+                    # 停止所有运行中的隧道
+                    for conf_file in "$old_wg_dir"/*.conf; do
+                        [[ -f "$conf_file" ]] || continue
+                        local interface=$(basename "$conf_file" .conf)
+                        if wg show "$interface" &>/dev/null; then
+                            INFO "停止隧道: $interface"
+                            wg-quick down "$conf_file" 2>/dev/null || true
+                        fi
+                    done
+
+                    # 复制配置文件
+                    if cp -r "$old_wg_dir"/* "$custom_path"/ 2>/dev/null; then
+                        INFO "配置文件迁移成功"
+                        read -p "是否删除原配置目录? (y/N): " remove_old
+                        if [[ "$remove_old" =~ ^[Yy]$ ]]; then
+                            rm -rf "$old_wg_dir"
+                            INFO "原配置目录已删除"
+                        fi
+                    else
+                        ERROR "配置文件迁移失败"
+                        continue
+                    fi
+                fi
+            fi
+
+            WG_DIR="$custom_path"
+            break
+        done
+    fi
+
+    # 更新相关路径变量
+    WG_CONFIG_DIR="${WG_DIR}/configs"
+    WG_KEYS_DIR="${WG_DIR}/keys"
+    WG_TUNNELS_DIR="${WG_DIR}/tunnels"
+
+    INFO "WireGuard安装路径: $WG_DIR"
+    INFO "配置文件目录: $WG_CONFIG_DIR"
+    INFO "密钥文件目录: $WG_KEYS_DIR"
+    INFO "隧道信息目录: $WG_TUNNELS_DIR"
+}
+
 # 检测并配置公网IP
 configure_public_ip() {
     local external_ipv4
@@ -1805,6 +1919,7 @@ main_menu() {
         case "$choice" in
             1)
                 detect_os
+                configure_install_path
                 detect_service_manager
                 detect_firewall
                 detect_startup_method
@@ -1882,10 +1997,11 @@ tunnel_management_menu() {
         echo -e "\033[1;32m2、查看隧道详细信息\033[0m"
         echo -e "\033[1;32m3、删除隧道\033[0m"
         echo -e "\033[1;32m4、查看所有客户端\033[0m"
-        echo -e "\033[1;32m5、返回主菜单\033[0m"
+        echo -e "\033[1;32m5、修改安装路径\033[0m"
+        echo -e "\033[1;32m6、返回主菜单\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
-        read -p "请输入您的选择（1-5）：" choice
+        read -p "请输入您的选择（1-6）：" choice
 
         case "$choice" in
             1)
@@ -1901,6 +2017,9 @@ tunnel_management_menu() {
                 list_clients
                 ;;
             5)
+                configure_install_path
+                ;;
+            6)
                 return 0
                 ;;
             *)
@@ -2043,6 +2162,44 @@ configure_firewall() {
 
 
 
+# 检测现有WireGuard配置路径
+detect_existing_config() {
+    # 检查常见的WireGuard配置路径
+    local common_paths=(
+        "/etc/wireguard"
+        "/opt/wireguard"
+        "/volume1/docker/wireguard"
+        "/volume1/@appstore/wireguard"
+        "/mnt/user/appdata/wireguard"
+        "/mnt/data/wireguard"
+    )
+
+    for path in "${common_paths[@]}"; do
+        if [[ -d "$path" ]] && [[ -n "$(ls "$path"/*.conf 2>/dev/null)" ]]; then
+            INFO "检测到现有WireGuard配置: $path"
+            read -p "是否使用现有配置路径? (Y/n): " use_existing
+            if [[ ! "$use_existing" =~ ^[Nn]$ ]]; then
+                WG_DIR="$path"
+                WG_CONFIG_DIR="${WG_DIR}/configs"
+                WG_KEYS_DIR="${WG_DIR}/keys"
+                WG_TUNNELS_DIR="${WG_DIR}/tunnels"
+                INFO "使用现有配置路径: $WG_DIR"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
 # 脚本入口
 check_root
+
+# 检测现有配置，如果没有则进行路径配置
+if ! detect_existing_config; then
+    # 如果是第一次安装，在主菜单前先配置路径
+    if [[ ! -d "$WG_DIR" ]] || [[ -z "$(ls "$WG_DIR"/*.conf 2>/dev/null)" ]]; then
+        configure_install_path
+    fi
+fi
+
 main_menu
