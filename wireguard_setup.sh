@@ -493,6 +493,22 @@ get_network_interface() {
     echo "$interface"
 }
 
+# 获取服务端主机的局域网段
+get_server_lan_network() {
+    local interface=$(get_network_interface)
+    if [[ $? -ne 0 ]] || [[ -z "$interface" ]]; then
+        return 1
+    fi
+
+    # 从路由表直接获取网段信息
+    local network=$(ip route show | grep "$interface" | grep -v default | cut -d' ' -f1 | head -n1)
+    if [[ -z "$network" ]]; then
+        return 1
+    fi
+
+    echo "$network"
+}
+
 # 安装WireGuard
 install_wireguard() {
     # 检查WireGuard是否已安装
@@ -1487,23 +1503,41 @@ generate_client_config() {
     # 询问是否允许其他节点访问当前节点的宿主机局域网
     echo -e "\n${Blue}=== 局域网访问配置 ===${Font}"
     echo "是否允许其他VPN节点访问当前节点所属的宿主机局域网？"
-    echo "${Yellow}建议在24小时开机的Linux设备（如路由器/NAS）上启用${Font}"
+    echo -e "${Yellow}建议在24小时开机的Linux设备（如路由器/NAS）上启用${Font}"
     echo "启用后，其他VPN客户端可以通过此节点访问其宿主机的局域网设备"
     read -p "是否启用局域网访问? (y/N): " enable_lan_access
 
     local client_lan_network=""
     if [[ "$enable_lan_access" =~ ^[Yy]$ ]]; then
+        # 获取服务端的局域网段用于冲突检查
+        local server_lan_network=$(get_server_lan_network)
+
         echo -e "\n请输入当前节点宿主机的局域网段："
         echo "格式示例: 192.168.1.0/24, 192.168.3.0/24, 10.0.0.0/24"
-        read -p "局域网段: " client_lan_network
-
-        # 验证网段格式
-        if [[ ! "$client_lan_network" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
-            WARN "无效的网段格式，跳过局域网访问配置"
-            client_lan_network=""
-        else
-            INFO "将允许其他VPN节点访问局域网段: $client_lan_network"
+        if [[ -n "$server_lan_network" ]]; then
+            echo -e "${Yellow}注意: 服务端局域网段为 $server_lan_network，请勿填写相同网段${Font}"
         fi
+
+        while true; do
+            read -p "局域网段: " client_lan_network
+
+            # 验证网段格式
+            if [[ ! "$client_lan_network" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$ ]]; then
+                WARN "无效的网段格式，请重新输入"
+                continue
+            fi
+
+            # 检查是否与服务端局域网段冲突
+            if [[ -n "$server_lan_network" ]] && [[ "$client_lan_network" == "$server_lan_network" ]]; then
+                ERROR "所填网段 $client_lan_network 属于服务端局域网！"
+                ERROR "如果客户端节点与服务端节点处于同一个局域网，无须填写此配置"
+                WARN "请填写不同的网段，或选择'N'跳过局域网访问配置"
+                continue
+            fi
+
+            INFO "将允许其他VPN节点访问局域网段: $client_lan_network"
+            break
+        done
     fi
 
     # 询问DNS配置
