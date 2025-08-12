@@ -4,7 +4,7 @@
 # 兼容xy_ailg.sh的日志风格
 
 # 脚本版本
-SCRIPT_VERSION="v0.2.1"
+SCRIPT_VERSION="v0.2.2"
 
 Green="\033[32m"
 Red="\033[31m"
@@ -2711,6 +2711,9 @@ main_menu() {
 
 # 启动WireGuard隧道菜单
 start_wireguard_menu() {
+    # 检测服务管理系统
+    detect_service_manager
+
     if ! select_tunnel "请选择要启动的隧道"; then
         ERROR "未找到可用隧道，请先创建隧道"
         return 1
@@ -2721,6 +2724,9 @@ start_wireguard_menu() {
 
 # 停止WireGuard隧道菜单
 stop_wireguard_menu() {
+    # 检测服务管理系统
+    detect_service_manager
+
     if ! select_tunnel "请选择要停止的隧道"; then
         ERROR "未找到可用隧道"
         return 1
