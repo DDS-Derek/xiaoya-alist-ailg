@@ -134,9 +134,16 @@ configure_install_path() {
 
             # 检查是否有现有配置需要迁移
             local old_wg_dir="$WG_DIR"
+            local real_old_dir="$old_wg_dir"
             local has_existing_config=false
 
-            if [[ -d "$old_wg_dir" ]] && [[ -n "$(ls "$old_wg_dir"/*.conf 2>/dev/null)" ]]; then
+            # 如果当前WG_DIR是软链接，获取真实路径
+            if [[ -L "$old_wg_dir" ]]; then
+                real_old_dir=$(readlink "$old_wg_dir")
+                INFO "检测到软链接: $old_wg_dir -> $real_old_dir"
+            fi
+
+            if [[ -d "$real_old_dir" ]] && [[ -n "$(ls "$real_old_dir"/*.conf 2>/dev/null)" ]]; then
                 has_existing_config=true
             fi
 
@@ -153,9 +160,14 @@ configure_install_path() {
             fi
 
             # 如果有现有配置，询问是否迁移
-            if [[ "$has_existing_config" == true ]] && [[ "$custom_path" != "$old_wg_dir" ]]; then
+            if [[ "$has_existing_config" == true ]] && [[ "$custom_path" != "$real_old_dir" ]]; then
                 echo -e "\n${Yellow}检测到现有配置文件${Font}"
-                echo "原路径: $old_wg_dir"
+                if [[ "$real_old_dir" != "$old_wg_dir" ]]; then
+                    echo "当前配置: $old_wg_dir -> $real_old_dir (软链接)"
+                    echo "真实路径: $real_old_dir"
+                else
+                    echo "原路径: $real_old_dir"
+                fi
                 echo "新路径: $custom_path"
                 read -p "是否迁移现有配置到新路径? (Y/n): " migrate_config
 
@@ -163,7 +175,7 @@ configure_install_path() {
                     INFO "迁移配置文件到新路径..."
 
                     # 停止所有运行中的隧道
-                    for conf_file in "$old_wg_dir"/*.conf; do
+                    for conf_file in "$real_old_dir"/*.conf; do
                         [[ -f "$conf_file" ]] || continue
                         local interface=$(basename "$conf_file" .conf)
                         if wg show "$interface" &>/dev/null; then
@@ -173,12 +185,23 @@ configure_install_path() {
                     done
 
                     # 复制配置文件
-                    if cp -r "$old_wg_dir"/* "$custom_path"/ 2>/dev/null; then
+                    if cp -r "$real_old_dir"/* "$custom_path"/ 2>/dev/null; then
                         INFO "配置文件迁移成功"
-                        read -p "是否删除原配置目录? (y/N): " remove_old
+
+                        # 询问是否删除原配置目录（配置已迁移到新目录）
+                        read -p "是否删除原配置目录 $real_old_dir? (y/N): " remove_old
                         if [[ "$remove_old" =~ ^[Yy]$ ]]; then
-                            rm -rf "$old_wg_dir"
-                            INFO "原配置目录已删除"
+                            # 删除真实目录（软链接会自动失效）
+                            rm -rf "$real_old_dir"
+                            INFO "原配置目录已删除: $real_old_dir"
+
+                            # 如果存在指向已删除目录的软链接，也删除它
+                            if [[ -L "$old_wg_dir" ]] && [[ ! -e "$old_wg_dir" ]]; then
+                                rm "$old_wg_dir"
+                                INFO "已清理失效的软链接: $old_wg_dir"
+                            fi
+                        else
+                            INFO "保留原配置目录: $real_old_dir"
                         fi
                     else
                         ERROR "配置文件迁移失败"
