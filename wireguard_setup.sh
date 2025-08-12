@@ -1141,7 +1141,22 @@ setup_new_tunnel() {
 customize_tunnel_config() {
     echo -e "\n${Blue}=== 自定义隧道配置 ===${Font}"
 
+    # 自定义配置目录
+    echo -e "\n${Yellow}配置目录设置${Font}"
+    if [[ -L "/etc/wireguard" ]]; then
+        local real_dir=$(readlink "/etc/wireguard")
+        echo "当前配置目录: /etc/wireguard -> $real_dir (软链接)"
+    else
+        echo "当前配置目录: /etc/wireguard (真实目录)"
+    fi
+
+    read -p "是否更改配置目录? (y/N): " change_dir
+    if [[ "$change_dir" =~ ^[Yy]$ ]]; then
+        configure_install_path
+    fi
+
     # 自定义端口
+    echo -e "\n${Yellow}网络配置${Font}"
     read -p "设置监听端口 [当前: $WG_PORT]: " custom_port
     if [[ -n "$custom_port" ]]; then
         if [[ "$custom_port" =~ ^[0-9]+$ ]] && [[ $custom_port -ge 1024 ]] && [[ $custom_port -le 65535 ]]; then
@@ -1163,6 +1178,12 @@ customize_tunnel_config() {
     fi
 
     INFO "更新后的配置:"
+    if [[ -L "/etc/wireguard" ]]; then
+        local real_dir=$(readlink "/etc/wireguard")
+        INFO "配置目录: /etc/wireguard -> $real_dir"
+    else
+        INFO "配置目录: /etc/wireguard"
+    fi
     INFO "监听端口: $WG_PORT"
     INFO "VPN网段: $WG_NETWORK"
     INFO "服务端IP: $WG_SERVER_IP"
@@ -2532,7 +2553,7 @@ detect_existing_config() {
                 INFO "实际存储位置: $real_dir"
             else
                 # 是真实目录
-                INFO "配置目录: $default_dir"
+                INFO "配置目录: $default_dir (真实目录)"
             fi
 
             # 程序运行时始终使用统一路径
