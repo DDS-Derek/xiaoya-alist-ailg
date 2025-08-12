@@ -2091,6 +2091,20 @@ start_wireguard() {
             # 检查是否使用默认目录
             if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
                 # 使用默认目录，可以使用systemd模板服务
+                INFO "使用systemd管理WireGuard服务"
+
+                # 创建systemd依赖配置，确保在文件系统挂载完成后启动
+                local drop_in_dir="/etc/systemd/system/wg-quick@${WG_INTERFACE}.service.d"
+                mkdir -p "$drop_in_dir"
+                cat > "${drop_in_dir}/mount-dependency.conf" << EOF
+[Unit]
+# 等待所有本地文件系统挂载完成
+After=local-fs.target
+Requires=local-fs.target
+EOF
+                INFO "已创建systemd挂载依赖配置"
+                systemctl daemon-reload
+
                 systemctl enable wg-quick@${WG_INTERFACE}
                 systemctl start wg-quick@${WG_INTERFACE}
 
@@ -2172,6 +2186,14 @@ stop_wireguard() {
             if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
                 systemctl stop wg-quick@${WG_INTERFACE}
                 systemctl disable wg-quick@${WG_INTERFACE}
+
+                # 清理systemd依赖配置
+                local drop_in_dir="/etc/systemd/system/wg-quick@${WG_INTERFACE}.service.d"
+                if [[ -d "$drop_in_dir" ]]; then
+                    rm -rf "$drop_in_dir"
+                    INFO "已清理systemd依赖配置"
+                    systemctl daemon-reload
+                fi
             else
                 wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf"
                 remove_autostart
