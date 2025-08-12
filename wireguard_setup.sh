@@ -4,7 +4,7 @@
 # 兼容xy_ailg.sh的日志风格
 
 # 脚本版本
-SCRIPT_VERSION="v0.2.0"
+SCRIPT_VERSION="v0.2.1"
 
 Green="\033[32m"
 Red="\033[31m"
@@ -1244,6 +1244,13 @@ load_tunnel_config() {
 
     source "$tunnel_info"
     CURRENT_TUNNEL="$tunnel_name"
+
+    # 重新设置目录变量（因为隧道配置文件中没有保存这些变量）
+    WG_DIR="/etc/wireguard"
+    WG_CONFIG_DIR="${WG_DIR}/configs"
+    WG_KEYS_DIR="${WG_DIR}/keys"
+    WG_TUNNELS_DIR="${WG_DIR}/tunnels"
+
     INFO "已加载隧道配置: $tunnel_name ($WG_INTERFACE)"
     return 0
 }
