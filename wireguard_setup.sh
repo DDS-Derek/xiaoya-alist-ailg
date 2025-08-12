@@ -1804,7 +1804,7 @@ generate_client_config() {
     echo -e "\n${Blue}=== 服务端局域网访问配置 ===${Font}"
     local server_lan_network=$(get_server_lan_network)
     if [[ -n "$server_lan_network" ]]; then
-        echo "检测到服务端节点的宿主机局域网段: ${Yellow}$server_lan_network${Font}"
+        echo -e "检测到服务端节点的宿主机局域网段: ${Yellow}$server_lan_network${Font}"
         echo "是否允许此客户端访问服务端节点的宿主机局域网？"
         echo -e "${Yellow}启用后，客户端可以访问服务端局域网内的其他设备（如路由器、NAS、打印机等）${Font}"
         read -p "是否允许访问服务端局域网? (y/N): " allow_server_lan_access
@@ -2436,45 +2436,161 @@ show_client_config() {
 
 # 卸载WireGuard
 uninstall_wireguard() {
-    echo -e "\n${Red}警告: 此操作将完全删除WireGuard及所有配置文件${Font}"
-    read -p "确认卸载? (y/N): " confirm
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo -e "\n${Blue}=== WireGuard 卸载确认 ===${Font}"
+
+    # 检查当前运行的隧道
+    local running_tunnels=()
+    local all_tunnels=()
+
+    # 获取所有隧道信息
+    for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+        [[ -f "$tunnel_info" ]] || continue
+        local tunnel_name=$(basename "$tunnel_info" .conf)
+        all_tunnels+=("$tunnel_name")
+
+        # 加载隧道配置
+        source "$tunnel_info"
+        if wg show "$WG_INTERFACE" &>/dev/null; then
+            running_tunnels+=("$tunnel_name ($WG_INTERFACE)")
+        fi
+    done
+
+    # 显示将要删除的内容
+    echo -e "${Yellow}此操作将删除以下内容：${Font}"
+    echo "1. WireGuard软件包"
+
+    if [[ ${#all_tunnels[@]} -gt 0 ]]; then
+        echo "2. 所有隧道配置 (${#all_tunnels[@]}个):"
+        for tunnel in "${all_tunnels[@]}"; do
+            echo "   - $tunnel"
+        done
+    else
+        echo "2. 配置文件目录"
+    fi
+
+    if [[ ${#running_tunnels[@]} -gt 0 ]]; then
+        echo -e "3. ${Red}当前运行的隧道 (${#running_tunnels[@]}个):${Font}"
+        for tunnel in "${running_tunnels[@]}"; do
+            echo -e "   - ${Red}$tunnel${Font}"
+        done
+    fi
+
+    echo "4. 所有客户端配置文件"
+    echo "5. 所有密钥文件"
+
+    # 显示配置目录信息
+    if [[ -L "/etc/wireguard" ]]; then
+        local real_dir=$(readlink "/etc/wireguard")
+        echo -e "6. 配置目录: /etc/wireguard -> ${Yellow}$real_dir${Font} (软链接和真实目录)"
+    else
+        echo "6. 配置目录: /etc/wireguard"
+    fi
+
+    echo -e "\n${Red}警告: 此操作不可逆，所有WireGuard配置将永久丢失！${Font}"
+    echo -e "${Yellow}建议在卸载前备份重要的配置文件${Font}"
+
+    # 第一次确认
+    read -p "确认要完全卸载WireGuard吗? (y/N): " confirm1
+    if [[ ! "$confirm1" =~ ^[Yy]$ ]]; then
+        INFO "卸载操作已取消"
         return 1
     fi
 
-    # 停止服务
-    systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null
-    systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null
+    # 第二次确认（如果有运行的隧道）
+    if [[ ${#running_tunnels[@]} -gt 0 ]]; then
+        echo -e "\n${Red}检测到正在运行的隧道，强制卸载将中断网络连接！${Font}"
+        read -p "确认强制停止所有隧道并卸载? (y/N): " confirm2
+        if [[ ! "$confirm2" =~ ^[Yy]$ ]]; then
+            INFO "卸载操作已取消"
+            return 1
+        fi
+    fi
+
+    INFO "开始卸载WireGuard..."
+
+    # 停止所有隧道服务
+    if [[ ${#all_tunnels[@]} -gt 0 ]]; then
+        INFO "停止所有WireGuard隧道..."
+        for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
+            [[ -f "$tunnel_info" ]] || continue
+            source "$tunnel_info"
+
+            if wg show "$WG_INTERFACE" &>/dev/null; then
+                INFO "停止隧道: $WG_INTERFACE"
+                wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
+            fi
+
+            # 禁用自启动服务
+            systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null || true
+            systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null || true
+        done
+    fi
 
     # 删除配置文件
-    rm -rf "$WG_DIR"
+    INFO "删除配置文件..."
+    if [[ -L "/etc/wireguard" ]]; then
+        local real_dir=$(readlink "/etc/wireguard")
+        INFO "删除软链接: /etc/wireguard"
+        rm -f "/etc/wireguard"
+        INFO "删除真实配置目录: $real_dir"
+        rm -rf "$real_dir"
+    else
+        INFO "删除配置目录: $WG_DIR"
+        rm -rf "$WG_DIR"
+    fi
 
     # 卸载软件包
+    INFO "卸载WireGuard软件包..."
     case $PACKAGE_MANAGER in
         "apt-get")
-            $PACKAGE_MANAGER remove -y wireguard wireguard-tools
+            $PACKAGE_MANAGER remove -y wireguard wireguard-tools 2>/dev/null || true
             ;;
         "yum"|"dnf")
-            $PACKAGE_MANAGER remove -y wireguard-tools
+            $PACKAGE_MANAGER remove -y wireguard-tools 2>/dev/null || true
             ;;
         "zypper")
-            $PACKAGE_MANAGER remove -y wireguard-tools
+            $PACKAGE_MANAGER remove -y wireguard-tools 2>/dev/null || true
             ;;
         "pacman")
-            $PACKAGE_MANAGER -R --noconfirm wireguard-tools
+            $PACKAGE_MANAGER -R --noconfirm wireguard-tools 2>/dev/null || true
             ;;
         "apk")
-            $PACKAGE_MANAGER del wireguard-tools
+            $PACKAGE_MANAGER del wireguard-tools 2>/dev/null || true
             ;;
         "opkg")
-            $PACKAGE_MANAGER remove wireguard-tools
+            $PACKAGE_MANAGER remove wireguard-tools 2>/dev/null || true
             ;;
         *)
-            WARN "未知包管理器，请手动卸载WireGuard"
+            WARN "未知包管理器: $PACKAGE_MANAGER，请手动卸载WireGuard"
             ;;
     esac
 
-    INFO "WireGuard已完全卸载"
+    # 清理系统配置
+    INFO "清理系统配置..."
+
+    # 恢复IP转发设置（可选）
+    echo -e "\n${Yellow}是否恢复IP转发设置到默认状态?${Font}"
+    echo "这将禁用系统的IP转发功能，可能影响其他网络服务"
+    read -p "恢复IP转发设置? (y/N): " restore_forward
+
+    if [[ "$restore_forward" =~ ^[Yy]$ ]]; then
+        # 注释掉sysctl.conf中的转发设置
+        if grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf 2>/dev/null; then
+            sed -i 's/^net\.ipv4\.ip_forward=1/#net.ipv4.ip_forward=1/' /etc/sysctl.conf
+            sysctl -w net.ipv4.ip_forward=0 2>/dev/null || true
+            INFO "已禁用IPv4转发"
+        fi
+        if grep -q "net.ipv6.conf.all.forwarding=1" /etc/sysctl.conf 2>/dev/null; then
+            sed -i 's/^net\.ipv6\.conf\.all\.forwarding=1/#net.ipv6.conf.all.forwarding=1/' /etc/sysctl.conf
+            sysctl -w net.ipv6.conf.all.forwarding=0 2>/dev/null || true
+            INFO "已禁用IPv6转发"
+        fi
+    else
+        INFO "保留IP转发设置"
+    fi
+
+    echo -e "\n${Green}WireGuard已完全卸载${Font}"
+    echo "如需重新安装，请重新运行此脚本"
 }
 
 # 主菜单
