@@ -312,11 +312,12 @@ configure_install_path() {
                             INFO "保留原配置目录: $real_old_dir"
                         fi
 
-                        # 重启之前运行的隧道
-                        if [[ ${#running_interfaces[@]} -gt 0 ]]; then
-                            echo -e "\n${Yellow}重启之前运行的隧道${Font}"
-                            # 先设置软链接，确保隧道能找到配置
-                            if setup_wireguard_symlink; then
+                        # 先设置软链接，确保后续重启隧道时能找到配置
+                        WG_DIR="$custom_path"
+                        if setup_wireguard_symlink; then
+                            # 重启之前运行的隧道
+                            if [[ ${#running_interfaces[@]} -gt 0 ]]; then
+                                echo -e "\n${Yellow}重启之前运行的隧道${Font}"
                                 for interface in "${running_interfaces[@]}"; do
                                     local new_conf_file="/etc/wireguard/${interface}.conf"
                                     if [[ -f "$new_conf_file" ]]; then
@@ -330,9 +331,9 @@ configure_install_path() {
                                         WARN "未找到隧道配置文件: $new_conf_file"
                                     fi
                                 done
-                            else
-                                WARN "软链接设置失败，请手动重启隧道"
                             fi
+                        else
+                            WARN "软链接设置失败，请手动重启隧道"
                         fi
                     else
                         ERROR "配置文件迁移失败"
@@ -341,7 +342,6 @@ configure_install_path() {
                 fi
             fi
 
-            WG_DIR="$custom_path"
             break
         done
     fi
@@ -353,8 +353,8 @@ configure_install_path() {
 
     INFO "WireGuard安装路径: $WG_DIR"
 
-    # 只有在使用自定义路径时才设置软链接
-    if [[ "$WG_DIR" != "/etc/wireguard" ]]; then
+    # 只有在使用自定义路径且还没设置软链接时才设置
+    if [[ "$WG_DIR" != "/etc/wireguard" ]] && [[ ! -L "/etc/wireguard" ]]; then
         if ! setup_wireguard_symlink; then
             ERROR "软链接设置失败"
             return 1
