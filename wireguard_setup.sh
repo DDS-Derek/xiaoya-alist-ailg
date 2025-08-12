@@ -1662,12 +1662,19 @@ delete_tunnel() {
         INFO "停止隧道服务: $WG_INTERFACE"
         case $SERVICE_MANAGER in
             "systemd")
-                if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
-                    systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null || true
-                    systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null || true
-                else
-                    wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
-                fi
+                # 停止和清理自定义systemd服务
+                local service_name="wireguard-${WG_INTERFACE}"
+                systemctl stop "${service_name}.service" 2>/dev/null || true
+                systemctl disable "${service_name}.service" 2>/dev/null || true
+                rm -f "/etc/systemd/system/${service_name}.service"
+
+                # 清理可能存在的旧配置
+                systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null || true
+                systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null || true
+                rm -rf "/etc/systemd/system/wg-quick@${WG_INTERFACE}.service.d" 2>/dev/null || true
+
+                systemctl daemon-reload
+                INFO "已清理systemd服务配置"
                 ;;
             *)
                 wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
@@ -2532,10 +2539,21 @@ uninstall_wireguard() {
                 wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf" 2>/dev/null || true
             fi
 
-            # 禁用自启动服务
+            # 清理所有相关的systemd服务
+            local service_name="wireguard-${WG_INTERFACE}"
+            systemctl stop "${service_name}.service" 2>/dev/null || true
+            systemctl disable "${service_name}.service" 2>/dev/null || true
+            rm -f "/etc/systemd/system/${service_name}.service"
+
+            # 清理可能存在的旧配置
             systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null || true
             systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null || true
+            rm -rf "/etc/systemd/system/wg-quick@${WG_INTERFACE}.service.d" 2>/dev/null || true
         done
+
+        # 重新加载systemd配置
+        systemctl daemon-reload
+        INFO "已清理所有systemd服务配置"
     fi
 
     # 删除配置文件
