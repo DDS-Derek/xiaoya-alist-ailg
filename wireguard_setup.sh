@@ -117,7 +117,93 @@ configure_install_path() {
     echo "2. 自定义安装路径"
     read -p "请选择 [1-2, 默认: 1]: " path_choice
 
-    if [[ "$path_choice" == "2" ]]; then
+    if [[ "$path_choice" == "1" ]] || [[ -z "$path_choice" ]]; then
+        # 选择默认路径 /etc/wireguard
+        local default_dir="/etc/wireguard"
+
+        # 检查当前 /etc/wireguard 的状态
+        if [[ -L "$default_dir" ]]; then
+            # 是软链接，需要转换为真实目录
+            local real_dir=$(readlink "$default_dir")
+            echo -e "\n${Yellow}检测到 /etc/wireguard 是软链接${Font}"
+            echo "当前指向: $real_dir"
+            echo "选择默认路径将把 /etc/wireguard 转换为真实目录"
+
+            # 检查是否有配置需要迁移
+            if [[ -d "$real_dir" ]] && [[ -n "$(ls "$real_dir"/*.conf 2>/dev/null)" ]]; then
+                echo -e "\n${Yellow}检测到现有配置文件${Font}"
+                echo "原真实目录: $real_dir"
+                echo "新真实目录: $default_dir"
+                read -p "是否迁移现有配置到默认目录? (Y/n): " migrate_config
+
+                if [[ ! "$migrate_config" =~ ^[Nn]$ ]]; then
+                    INFO "迁移配置文件到默认目录..."
+
+                    # 停止所有运行中的隧道
+                    for conf_file in "$real_dir"/*.conf; do
+                        [[ -f "$conf_file" ]] || continue
+                        local interface=$(basename "$conf_file" .conf)
+                        if wg show "$interface" &>/dev/null; then
+                            INFO "停止隧道: $interface"
+                            wg-quick down "$conf_file" 2>/dev/null || true
+                        fi
+                    done
+
+                    # 删除软链接
+                    rm "$default_dir"
+                    INFO "已删除软链接: $default_dir"
+
+                    # 创建真实目录并复制配置
+                    mkdir -p "$default_dir"
+                    mkdir -p "${default_dir}/configs"
+                    mkdir -p "${default_dir}/keys"
+                    mkdir -p "${default_dir}/tunnels"
+
+                    if cp -r "$real_dir"/* "$default_dir"/ 2>/dev/null; then
+                        INFO "配置文件迁移成功"
+
+                        # 询问是否删除原配置目录
+                        read -p "是否删除原配置目录 $real_dir? (y/N): " remove_old
+                        if [[ "$remove_old" =~ ^[Yy]$ ]]; then
+                            rm -rf "$real_dir"
+                            INFO "原配置目录已删除: $real_dir"
+                        else
+                            INFO "保留原配置目录: $real_dir"
+                        fi
+                    else
+                        ERROR "配置文件迁移失败"
+                        return 1
+                    fi
+                else
+                    # 不迁移，只删除软链接创建空的真实目录
+                    rm "$default_dir"
+                    mkdir -p "$default_dir"
+                    mkdir -p "${default_dir}/configs"
+                    mkdir -p "${default_dir}/keys"
+                    mkdir -p "${default_dir}/tunnels"
+                    INFO "已创建空的默认目录: $default_dir"
+                fi
+            else
+                # 没有配置文件，直接转换
+                rm "$default_dir"
+                mkdir -p "$default_dir"
+                mkdir -p "${default_dir}/configs"
+                mkdir -p "${default_dir}/keys"
+                mkdir -p "${default_dir}/tunnels"
+                INFO "已转换为真实目录: $default_dir"
+            fi
+        elif [[ ! -d "$default_dir" ]]; then
+            # 目录不存在，创建它
+            mkdir -p "$default_dir"
+            mkdir -p "${default_dir}/configs"
+            mkdir -p "${default_dir}/keys"
+            mkdir -p "${default_dir}/tunnels"
+            INFO "已创建默认目录: $default_dir"
+        fi
+
+        WG_DIR="$default_dir"
+
+    elif [[ "$path_choice" == "2" ]]; then
         while true; do
             read -p "请输入自定义安装路径 (如: /opt/wireguard): " custom_path
 
@@ -222,10 +308,12 @@ configure_install_path() {
 
     INFO "WireGuard安装路径: $WG_DIR"
 
-    # 设置软链接以确保兼容性
-    if ! setup_wireguard_symlink; then
-        ERROR "软链接设置失败"
-        return 1
+    # 只有在使用自定义路径时才设置软链接
+    if [[ "$WG_DIR" != "/etc/wireguard" ]]; then
+        if ! setup_wireguard_symlink; then
+            ERROR "软链接设置失败"
+            return 1
+        fi
     fi
     INFO "配置文件目录: $WG_CONFIG_DIR"
     INFO "密钥文件目录: $WG_KEYS_DIR"
