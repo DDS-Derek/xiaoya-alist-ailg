@@ -4,7 +4,7 @@
 # 兼容xy_ailg.sh的日志风格
 
 # 脚本版本
-SCRIPT_VERSION="v0.1.0"
+SCRIPT_VERSION="v2.0.0"
 
 Green="\033[32m"
 Red="\033[31m"
@@ -241,6 +241,11 @@ configure_install_path() {
                 continue
             fi
 
+            if [[ "$custom_path" == "/etc/wireguard" ]]; then
+                ERROR "自定义路径不能使用默认的/etc/wireguard"
+                continue
+            fi
+
             # 检查是否有现有配置需要迁移
             local old_wg_dir="$WG_DIR"
             local real_old_dir="$old_wg_dir"
@@ -342,6 +347,34 @@ configure_install_path() {
                         ERROR "配置文件迁移失败"
                         continue
                     fi
+                else
+                    # 用户选择不迁移配置，但仍需要设置自定义路径
+                    WG_DIR="$custom_path"
+
+                    # 创建必要的子目录
+                    mkdir -p "${custom_path}/configs"
+                    mkdir -p "${custom_path}/keys"
+                    mkdir -p "${custom_path}/tunnels"
+
+                    # 设置软链接
+                    if ! setup_wireguard_symlink; then
+                        ERROR "软链接设置失败"
+                        return 1
+                    fi
+                fi
+            else
+                # 没有现有配置，或路径相同，直接设置自定义路径
+                WG_DIR="$custom_path"
+
+                # 创建必要的子目录
+                mkdir -p "${custom_path}/configs"
+                mkdir -p "${custom_path}/keys"
+                mkdir -p "${custom_path}/tunnels"
+
+                # 设置软链接
+                if ! setup_wireguard_symlink; then
+                    ERROR "软链接设置失败"
+                    return 1
                 fi
             fi
 
@@ -355,14 +388,6 @@ configure_install_path() {
     WG_TUNNELS_DIR="${WG_DIR}/tunnels"
 
     INFO "WireGuard安装路径: $WG_DIR"
-
-    # 只有在使用自定义路径且还没设置软链接时才设置
-    if [[ "$WG_DIR" != "/etc/wireguard" ]] && [[ ! -L "/etc/wireguard" ]]; then
-        if ! setup_wireguard_symlink; then
-            ERROR "软链接设置失败"
-            return 1
-        fi
-    fi
     INFO "配置文件目录: $WG_CONFIG_DIR"
     INFO "密钥文件目录: $WG_KEYS_DIR"
     INFO "隧道信息目录: $WG_TUNNELS_DIR"
