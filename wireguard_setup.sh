@@ -139,11 +139,13 @@ configure_install_path() {
                 if [[ ! "$migrate_config" =~ ^[Nn]$ ]]; then
                     INFO "迁移配置文件到默认目录..."
 
-                    # 停止所有运行中的隧道
+                    # 记录当前运行的隧道
+                    local running_interfaces=()
                     for conf_file in "$real_dir"/*.conf; do
                         [[ -f "$conf_file" ]] || continue
                         local interface=$(basename "$conf_file" .conf)
                         if wg show "$interface" &>/dev/null; then
+                            running_interfaces+=("$interface")
                             INFO "停止隧道: $interface"
                             wg-quick down "$conf_file" 2>/dev/null || true
                         fi
@@ -169,6 +171,24 @@ configure_install_path() {
                             INFO "原配置目录已删除: $real_dir"
                         else
                             INFO "保留原配置目录: $real_dir"
+                        fi
+
+                        # 重启之前运行的隧道
+                        if [[ ${#running_interfaces[@]} -gt 0 ]]; then
+                            echo -e "\n${Yellow}重启之前运行的隧道${Font}"
+                            for interface in "${running_interfaces[@]}"; do
+                                local new_conf_file="${default_dir}/${interface}.conf"
+                                if [[ -f "$new_conf_file" ]]; then
+                                    INFO "重启隧道: $interface"
+                                    if wg-quick up "$new_conf_file" 2>/dev/null; then
+                                        INFO "隧道 $interface 启动成功"
+                                    else
+                                        WARN "隧道 $interface 启动失败，请手动检查配置"
+                                    fi
+                                else
+                                    WARN "未找到隧道配置文件: $new_conf_file"
+                                fi
+                            done
                         fi
                     else
                         ERROR "配置文件迁移失败"
@@ -260,11 +280,13 @@ configure_install_path() {
                 if [[ ! "$migrate_config" =~ ^[Nn]$ ]]; then
                     INFO "迁移配置文件到新路径..."
 
-                    # 停止所有运行中的隧道
+                    # 记录当前运行的隧道
+                    local running_interfaces=()
                     for conf_file in "$real_old_dir"/*.conf; do
                         [[ -f "$conf_file" ]] || continue
                         local interface=$(basename "$conf_file" .conf)
                         if wg show "$interface" &>/dev/null; then
+                            running_interfaces+=("$interface")
                             INFO "停止隧道: $interface"
                             wg-quick down "$conf_file" 2>/dev/null || true
                         fi
@@ -288,6 +310,29 @@ configure_install_path() {
                             fi
                         else
                             INFO "保留原配置目录: $real_old_dir"
+                        fi
+
+                        # 重启之前运行的隧道
+                        if [[ ${#running_interfaces[@]} -gt 0 ]]; then
+                            echo -e "\n${Yellow}重启之前运行的隧道${Font}"
+                            # 先设置软链接，确保隧道能找到配置
+                            if setup_wireguard_symlink; then
+                                for interface in "${running_interfaces[@]}"; do
+                                    local new_conf_file="/etc/wireguard/${interface}.conf"
+                                    if [[ -f "$new_conf_file" ]]; then
+                                        INFO "重启隧道: $interface"
+                                        if wg-quick up "$new_conf_file" 2>/dev/null; then
+                                            INFO "隧道 $interface 启动成功"
+                                        else
+                                            WARN "隧道 $interface 启动失败，请手动检查配置"
+                                        fi
+                                    else
+                                        WARN "未找到隧道配置文件: $new_conf_file"
+                                    fi
+                                done
+                            else
+                                WARN "软链接设置失败，请手动重启隧道"
+                            fi
                         fi
                     else
                         ERROR "配置文件迁移失败"
