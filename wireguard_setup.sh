@@ -2040,9 +2040,23 @@ start_wireguard() {
                 systemctl enable wg-quick@${WG_INTERFACE}
                 systemctl start wg-quick@${WG_INTERFACE}
 
-                if systemctl is-active --quiet wg-quick@${WG_INTERFACE}; then
+                # 检查systemd服务状态和实际接口状态
+                if systemctl is-active --quiet wg-quick@${WG_INTERFACE} && wg show ${WG_INTERFACE} &>/dev/null; then
                     INFO "WireGuard服务启动成功"
                     wg show
+                elif systemctl is-active --quiet wg-quick@${WG_INTERFACE}; then
+                    # systemd显示active但接口未运行，可能是软链接问题，尝试手动启动
+                    WARN "systemd服务显示active但接口未运行，尝试手动启动"
+                    systemctl stop wg-quick@${WG_INTERFACE}
+                    sleep 1
+                    wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
+                    if wg show ${WG_INTERFACE} &>/dev/null; then
+                        INFO "手动启动成功"
+                        wg show
+                    else
+                        ERROR "手动启动也失败，请检查配置文件"
+                        return 1
+                    fi
                 else
                     ERROR "WireGuard服务启动失败"
                     systemctl status wg-quick@${WG_INTERFACE}
