@@ -4,7 +4,7 @@
 # 兼容xy_ailg.sh的日志风格
 
 # 脚本版本
-SCRIPT_VERSION="v0.2.2"
+SCRIPT_VERSION="v0.2.3"
 
 Green="\033[32m"
 Red="\033[31m"
@@ -2095,61 +2095,46 @@ start_wireguard() {
 
     case $SERVICE_MANAGER in
         "systemd")
-            # 检查是否使用默认目录
-            if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
-                # 使用默认目录，可以使用systemd模板服务
-                INFO "使用systemd管理WireGuard服务"
+            # 使用自定义systemd服务，避免挂载时序问题
+            INFO "使用systemd自定义服务管理WireGuard"
 
-                # 创建systemd依赖配置，确保在文件系统挂载完成后启动
-                local drop_in_dir="/etc/systemd/system/wg-quick@${WG_INTERFACE}.service.d"
-                mkdir -p "$drop_in_dir"
-                cat > "${drop_in_dir}/mount-dependency.conf" << EOF
+            # 清理可能存在的旧配置
+            systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null || true
+            systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null || true
+            rm -rf "/etc/systemd/system/wg-quick@${WG_INTERFACE}.service.d" 2>/dev/null || true
+
+            # 创建自定义systemd服务
+            local service_name="wireguard-${WG_INTERFACE}"
+            cat > "/etc/systemd/system/${service_name}.service" << EOF
 [Unit]
-# 等待所有本地文件系统挂载完成
-After=local-fs.target
-Requires=local-fs.target
+Description=WireGuard Auto Start for ${WG_INTERFACE}
+After=multi-user.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/bin/wg-quick up ${WG_DIR}/${WG_INTERFACE}.conf
+ExecStop=/usr/bin/wg-quick down ${WG_DIR}/${WG_INTERFACE}.conf
+
+[Install]
+WantedBy=multi-user.target
 EOF
-                INFO "已创建systemd挂载依赖配置"
-                systemctl daemon-reload
 
-                systemctl enable wg-quick@${WG_INTERFACE}
-                systemctl start wg-quick@${WG_INTERFACE}
+            systemctl daemon-reload
+            systemctl enable "${service_name}.service"
+            systemctl start "${service_name}.service"
 
-                # 检查systemd服务状态和实际接口状态
-                if systemctl is-active --quiet wg-quick@${WG_INTERFACE} && wg show ${WG_INTERFACE} &>/dev/null; then
-                    INFO "WireGuard服务启动成功"
-                    wg show
-                elif systemctl is-active --quiet wg-quick@${WG_INTERFACE}; then
-                    # systemd显示active但接口未运行，可能是软链接问题，尝试手动启动
-                    WARN "systemd服务显示active但接口未运行，尝试手动启动"
-                    systemctl stop wg-quick@${WG_INTERFACE}
-                    sleep 1
-                    wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
-                    if wg show ${WG_INTERFACE} &>/dev/null; then
-                        INFO "手动启动成功"
-                        wg show
-                    else
-                        ERROR "手动启动也失败，请检查配置文件"
-                        return 1
-                    fi
-                else
-                    ERROR "WireGuard服务启动失败"
-                    systemctl status wg-quick@${WG_INTERFACE}
-                    return 1
-                fi
+            # 检查自定义服务状态和接口状态
+            sleep 2  # 等待服务启动
+            if systemctl is-active --quiet "${service_name}.service" && wg show ${WG_INTERFACE} &>/dev/null; then
+                INFO "WireGuard服务启动成功"
+                wg show
             else
-                # 使用自定义目录，手动启动并配置开机自启动
-                WARN "检测到自定义配置目录，将使用手动启动方式"
-                wg-quick up "${WG_DIR}/${WG_INTERFACE}.conf"
-                if wg show ${WG_INTERFACE} &> /dev/null; then
-                    INFO "WireGuard接口启动成功"
-                    wg show
-                    # 配置开机自启动
-                    setup_autostart
-                else
-                    ERROR "WireGuard接口启动失败"
-                    return 1
-                fi
+                ERROR "WireGuard服务启动失败"
+                systemctl status "${service_name}.service"
+                return 1
             fi
             ;;
         "openrc")
@@ -2190,21 +2175,19 @@ stop_wireguard() {
 
     case $SERVICE_MANAGER in
         "systemd")
-            if [[ "$WG_DIR" == "/etc/wireguard" ]]; then
-                systemctl stop wg-quick@${WG_INTERFACE}
-                systemctl disable wg-quick@${WG_INTERFACE}
+            # 停止和清理自定义systemd服务
+            local service_name="wireguard-${WG_INTERFACE}"
+            systemctl stop "${service_name}.service" 2>/dev/null || true
+            systemctl disable "${service_name}.service" 2>/dev/null || true
+            rm -f "/etc/systemd/system/${service_name}.service"
 
-                # 清理systemd依赖配置
-                local drop_in_dir="/etc/systemd/system/wg-quick@${WG_INTERFACE}.service.d"
-                if [[ -d "$drop_in_dir" ]]; then
-                    rm -rf "$drop_in_dir"
-                    INFO "已清理systemd依赖配置"
-                    systemctl daemon-reload
-                fi
-            else
-                wg-quick down "${WG_DIR}/${WG_INTERFACE}.conf"
-                remove_autostart
-            fi
+            # 清理可能存在的旧配置
+            systemctl stop wg-quick@${WG_INTERFACE} 2>/dev/null || true
+            systemctl disable wg-quick@${WG_INTERFACE} 2>/dev/null || true
+            rm -rf "/etc/systemd/system/wg-quick@${WG_INTERFACE}.service.d" 2>/dev/null || true
+
+            systemctl daemon-reload
+            INFO "已清理systemd服务配置"
             ;;
         "openrc")
             rc-service wg-quick.${WG_INTERFACE} stop
