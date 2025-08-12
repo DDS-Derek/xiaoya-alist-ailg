@@ -1800,6 +1800,32 @@ generate_client_config() {
         allowed_ips="0.0.0.0/0"
     fi
 
+    # 询问是否允许客户端访问服务端节点的宿主机局域网
+    echo -e "\n${Blue}=== 服务端局域网访问配置 ===${Font}"
+    local server_lan_network=$(get_server_lan_network)
+    if [[ -n "$server_lan_network" ]]; then
+        echo "检测到服务端节点的宿主机局域网段: ${Yellow}$server_lan_network${Font}"
+        echo "是否允许此客户端访问服务端节点的宿主机局域网？"
+        echo -e "${Yellow}启用后，客户端可以访问服务端局域网内的其他设备（如路由器、NAS、打印机等）${Font}"
+        read -p "是否允许访问服务端局域网? (y/N): " allow_server_lan_access
+
+        if [[ "$allow_server_lan_access" =~ ^[Yy]$ ]]; then
+            # 将服务端局域网段添加到AllowedIPs
+            if [[ "$allowed_ips" == "0.0.0.0/0" ]]; then
+                # 如果已经是全部流量，无需额外添加
+                INFO "已选择全部流量通过VPN，自动包含服务端局域网访问"
+            else
+                # 添加服务端局域网段到AllowedIPs
+                allowed_ips="$allowed_ips,$server_lan_network"
+                INFO "已添加服务端局域网段到客户端路由: $server_lan_network"
+            fi
+        else
+            INFO "客户端将无法访问服务端局域网，仅可访问VPN网段"
+        fi
+    else
+        WARN "无法检测到服务端局域网段，跳过局域网访问配置"
+    fi
+
     # 询问是否允许其他节点访问当前节点的宿主机局域网
     echo -e "\n${Blue}=== 局域网访问配置 ===${Font}"
     echo "是否允许其他VPN节点访问当前节点所属的宿主机局域网？"
@@ -1809,8 +1835,8 @@ generate_client_config() {
 
     local client_lan_network=""
     if [[ "$enable_lan_access" =~ ^[Yy]$ ]]; then
-        # 获取服务端的局域网段用于冲突检查
-        local server_lan_network=$(get_server_lan_network)
+        # 使用之前已获取的服务端局域网段用于冲突检查
+        # local server_lan_network=$(get_server_lan_network)  # 已在上面获取过
 
         echo -e "\n请输入当前节点宿主机的局域网段："
         echo "格式示例: 192.168.1.0/24, 192.168.3.0/24, 10.0.0.0/24"
