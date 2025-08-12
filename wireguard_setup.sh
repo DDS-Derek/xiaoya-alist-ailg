@@ -4,7 +4,7 @@
 # 兼容xy_ailg.sh的日志风格
 
 # 脚本版本
-SCRIPT_VERSION="v2.0.0"
+SCRIPT_VERSION="v0.2.0"
 
 Green="\033[32m"
 Red="\033[31m"
