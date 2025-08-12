@@ -198,6 +198,12 @@ configure_install_path() {
     WG_TUNNELS_DIR="${WG_DIR}/tunnels"
 
     INFO "WireGuard安装路径: $WG_DIR"
+
+    # 设置软链接以确保兼容性
+    if ! setup_wireguard_symlink; then
+        ERROR "软链接设置失败"
+        return 1
+    fi
     INFO "配置文件目录: $WG_CONFIG_DIR"
     INFO "密钥文件目录: $WG_KEYS_DIR"
     INFO "隧道信息目录: $WG_TUNNELS_DIR"
@@ -509,6 +515,95 @@ get_server_lan_network() {
     echo "$network"
 }
 
+# 设置WireGuard目录软链接
+setup_wireguard_symlink() {
+    local custom_dir="$WG_DIR"  # 用户的自定义目录
+    local default_dir="/etc/wireguard"
+
+    # 如果自定义目录就是默认目录，无需处理
+    if [[ "$custom_dir" == "$default_dir" ]]; then
+        return 0
+    fi
+
+    INFO "设置WireGuard目录软链接: $default_dir -> $custom_dir"
+
+    # 检查 /etc/wireguard 的状态
+    if [[ -L "$default_dir" ]]; then
+        # 已经是软链接，检查是否指向正确位置
+        local current_target=$(readlink "$default_dir")
+        if [[ "$current_target" == "$custom_dir" ]]; then
+            INFO "/etc/wireguard 已正确链接到 $custom_dir"
+            return 0
+        else
+            WARN "/etc/wireguard 链接到 $current_target，将重新链接到 $custom_dir"
+            rm "$default_dir"
+        fi
+    elif [[ -d "$default_dir" ]]; then
+        # 是真实目录，需要处理现有内容
+        if [[ -n "$(ls -A "$default_dir" 2>/dev/null)" ]]; then
+            echo -e "\n${Yellow}检测到 /etc/wireguard 目录中有现有配置${Font}"
+            echo "将会："
+            echo "1. 将现有配置迁移到自定义目录 $custom_dir"
+            echo "2. 删除 /etc/wireguard 目录"
+            echo "3. 创建软链接 /etc/wireguard -> $custom_dir"
+            read -p "是否继续? (y/N): " confirm
+            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+                ERROR "操作已取消，可以手动备份/etc/wireguard中的配置，然后清空后重新安装"
+                return 1
+            fi
+
+            # 迁移现有配置
+            mkdir -p "$custom_dir"
+            mkdir -p "${custom_dir}/configs"
+            mkdir -p "${custom_dir}/keys"
+            mkdir -p "${custom_dir}/tunnels"
+
+            # 迁移配置文件
+            if [[ -d "${default_dir}/configs" ]]; then
+                cp -r "${default_dir}/configs"/* "${custom_dir}/configs/" 2>/dev/null || true
+            fi
+            if [[ -d "${default_dir}/keys" ]]; then
+                cp -r "${default_dir}/keys"/* "${custom_dir}/keys/" 2>/dev/null || true
+            fi
+            if [[ -d "${default_dir}/tunnels" ]]; then
+                cp -r "${default_dir}/tunnels"/* "${custom_dir}/tunnels/" 2>/dev/null || true
+            fi
+
+            # 迁移根目录下的配置文件
+            for file in "${default_dir}"/*.conf; do
+                [[ -f "$file" ]] && cp "$file" "$custom_dir/"
+            done
+
+            INFO "配置已迁移到 $custom_dir"
+        fi
+
+        # 删除原目录
+        rm -rf "$default_dir"
+    elif [[ -f "$default_dir" ]]; then
+        # 如果是文件，先备份再删除
+        WARN "/etc/wireguard 是一个文件，将备份为 /etc/wireguard.bak"
+        mv "$default_dir" "${default_dir}.bak"
+    fi
+
+    # 创建自定义目录（如果不存在）
+    mkdir -p "$custom_dir"
+    mkdir -p "${custom_dir}/configs"
+    mkdir -p "${custom_dir}/keys"
+    mkdir -p "${custom_dir}/tunnels"
+
+    # 创建软链接
+    ln -s "$custom_dir" "$default_dir"
+    INFO "已创建软链接: /etc/wireguard -> $custom_dir"
+
+    # 更新全局变量指向默认路径（因为现在软链接已经统一了）
+    WG_DIR="/etc/wireguard"
+    WG_CONFIG_DIR="${WG_DIR}/configs"
+    WG_KEYS_DIR="${WG_DIR}/keys"
+    WG_TUNNELS_DIR="${WG_DIR}/tunnels"
+
+    return 0
+}
+
 # 安装WireGuard
 install_wireguard() {
     # 检查WireGuard是否已安装
@@ -741,7 +836,7 @@ show_qrcode() {
         echo -e "${Yellow}提示：可以使用WireGuard客户端扫描上方二维码快速导入配置${Font}"
         echo -e "${Yellow}支持的客户端：WireGuard官方客户端、TunSafe等${Font}"
     else
-        WARN "qrencode未安装，提供替代方案"
+        WARN "需要安装qrencode后才能使用二维码配置导入功能，可选替代方案："
         echo
         echo -e "${Yellow}方案1：在线二维码生成工具${Font}"
         echo "请将配置内容复制到以下在线工具生成二维码："
@@ -832,7 +927,7 @@ get_next_network() {
         local used=false
         for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
             [[ -f "$tunnel_info" ]] || continue
-            if grep -q "^WG_NETWORK=${network}$" "$tunnel_info"; then
+            if grep -q "^WG_NETWORK=\"${network}\"$" "$tunnel_info"; then
                 used=true
                 break
             fi
@@ -849,7 +944,7 @@ get_next_network() {
         local used=false
         for tunnel_info in "${WG_TUNNELS_DIR}"/*.conf; do
             [[ -f "$tunnel_info" ]] || continue
-            if grep -q "^WG_NETWORK=${network}$" "$tunnel_info"; then
+            if grep -q "^WG_NETWORK=\"${network}\"$" "$tunnel_info"; then
                 used=true
                 break
             fi
@@ -2164,9 +2259,10 @@ main_menu() {
                     detect_service_manager
                     detect_firewall
                     detect_startup_method
-                    setup_server
-                    configure_firewall
-                    start_wireguard
+                    if setup_server; then
+                        configure_firewall
+                        start_wireguard
+                    fi
                 else
                     INFO "WireGuard未安装，开始完整安装流程"
                     detect_os
@@ -2174,10 +2270,12 @@ main_menu() {
                     detect_service_manager
                     detect_firewall
                     detect_startup_method
-                    install_wireguard
-                    setup_server
-                    configure_firewall
-                    start_wireguard
+                    if install_wireguard; then
+                        if setup_server; then
+                            configure_firewall
+                            start_wireguard
+                        fi
+                    fi
                 fi
                 ;;
             2)
@@ -2416,76 +2514,37 @@ configure_firewall() {
 
 
 
-# 检测现有WireGuard配置路径
+# 检测现有WireGuard配置
 detect_existing_config() {
-    # 首先检查是否有正在运行的WireGuard接口
-    local running_interfaces=()
-    if command -v wg &> /dev/null; then
-        while IFS= read -r interface; do
-            [[ -n "$interface" ]] && running_interfaces+=("$interface")
-        done < <(wg show interfaces 2>/dev/null)
-    fi
+    local default_dir="/etc/wireguard"
 
-    # 如果有运行中的接口，尝试找到其配置文件路径
-    if [[ ${#running_interfaces[@]} -gt 0 ]]; then
-        INFO "检测到正在运行的WireGuard接口: ${running_interfaces[*]}"
+    # 检查 /etc/wireguard 是否存在配置
+    if [[ -d "$default_dir" ]] || [[ -L "$default_dir" ]]; then
+        # 检查是否有配置文件
+        if [[ -n "$(ls "$default_dir"/*.conf 2>/dev/null)" ]] || [[ -n "$(ls "$default_dir"/tunnels/*.conf 2>/dev/null)" ]]; then
+            INFO "检测到现有WireGuard配置"
 
-        # 尝试找到配置文件路径
-        for interface in "${running_interfaces[@]}"; do
-            # 检查常见路径
-            local config_paths=(
-                "/etc/wireguard/${interface}.conf"
-                "/opt/wireguard/${interface}.conf"
-                "/volume1/docker/wireguard/${interface}.conf"
-                "/volume1/@appstore/wireguard/${interface}.conf"
-                "/mnt/user/appdata/wireguard/${interface}.conf"
-                "/vol1/1000/wireguard/${interface}.conf"
-            )
-
-            for config_path in "${config_paths[@]}"; do
-                if [[ -f "$config_path" ]]; then
-                    local detected_dir=$(dirname "$config_path")
-                    INFO "检测到运行中的WireGuard配置: $detected_dir"
-                    echo -e "${Yellow}当前WireGuard正在运行，建议使用现有配置目录${Font}"
-                    read -p "是否使用现有配置目录 $detected_dir? (Y/n): " use_running
-                    if [[ ! "$use_running" =~ ^[Nn]$ ]]; then
-                        WG_DIR="$detected_dir"
-                        WG_CONFIG_DIR="${WG_DIR}/configs"
-                        WG_KEYS_DIR="${WG_DIR}/keys"
-                        WG_TUNNELS_DIR="${WG_DIR}/tunnels"
-                        INFO "使用运行中的配置路径: $WG_DIR"
-                        return 0
-                    fi
-                    break
-                fi
-            done
-        done
-    fi
-
-    # 检查常见的WireGuard配置路径（即使没有运行中的接口）
-    local common_paths=(
-        "/etc/wireguard"
-        "/opt/wireguard"
-        "/volume1/docker/wireguard"
-        "/volume1/@appstore/wireguard"
-        "/mnt/user/appdata/wireguard"
-        "/vol1/1000/wireguard"
-    )
-
-    for path in "${common_paths[@]}"; do
-        if [[ -d "$path" ]] && [[ -n "$(ls "$path"/*.conf 2>/dev/null)" ]]; then
-            INFO "检测到现有WireGuard配置: $path"
-            read -p "是否使用现有配置路径? (Y/n): " use_existing
-            if [[ ! "$use_existing" =~ ^[Nn]$ ]]; then
-                WG_DIR="$path"
-                WG_CONFIG_DIR="${WG_DIR}/configs"
-                WG_KEYS_DIR="${WG_DIR}/keys"
-                WG_TUNNELS_DIR="${WG_DIR}/tunnels"
-                INFO "使用现有配置路径: $WG_DIR"
-                return 0
+            # 显示真实的配置目录路径（仅用于用户了解）
+            if [[ -L "$default_dir" ]]; then
+                # 是软链接，显示真实路径
+                local real_dir=$(readlink "$default_dir")
+                INFO "配置目录: $default_dir -> $real_dir (软链接)"
+                INFO "实际存储位置: $real_dir"
+            else
+                # 是真实目录
+                INFO "配置目录: $default_dir"
             fi
+
+            # 程序运行时始终使用统一路径
+            WG_DIR="$default_dir"
+            WG_CONFIG_DIR="${WG_DIR}/configs"
+            WG_KEYS_DIR="${WG_DIR}/keys"
+            WG_TUNNELS_DIR="${WG_DIR}/tunnels"
+
+            return 0
         fi
-    done
+    fi
+
     return 1
 }
 
