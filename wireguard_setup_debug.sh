@@ -2530,7 +2530,7 @@ install_wireguard_client() {
     if [[ "$import_now" =~ ^[Yy]$ ]]; then
         import_client_config || WARN "导入配置失败，可稍后手动导入"
     else
-        INFO "您可以稍后将服务端生成的 <name>.conf 放到任意路径，并在 /etc/wireguard 下创建软链接后执行 wg-quick up"
+        INFO "您可以将服务端生成客户端配置文件上传到本设备，重新运行脚本加载并启动配置！"
     fi
 }
 
@@ -2810,7 +2810,7 @@ main_menu() {
     while true; do
         clear
         echo -e "———————————————————————————————————— \033[1;33mWireGuard 多隧道管理工具\033[0m —————————————————————————————————"
-        echo -e "\033[1;36m                                        版本: ${SCRIPT_VERSION}\033[0m"
+        echo -e "\033[1;36m                                        版本: ${SCRIPT_VERSION}  作者：AI老G\033[0m"
         echo -e "\n"
         echo -e "\033[1;32m1、安装WireGuard/创建隧道 - 服务端\033[0m"
         echo -e "\033[1;32m2、安装WireGuard/加载配置 - 客户端\033[0m"
