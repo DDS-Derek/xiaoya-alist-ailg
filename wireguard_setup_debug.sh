@@ -995,6 +995,42 @@ ensure_curl() {
     command -v curl >/dev/null 2>&1 || ensure_pkg curl curl || true
 }
 
+# 尝试确保 resolvconf（或等效）用于处理 DNS（wg-quick 在有 DNS= 时会调用）
+ensure_resolvconf() {
+    # 如果已具备 resolvconf 或 systemd-resolved 的 resolvectl，则不处理
+    if command -v resolvconf >/dev/null 2>&1 || command -v resolvectl >/dev/null 2>&1; then
+        return 0
+    fi
+    if [[ -z "$PACKAGE_MANAGER" ]]; then
+        detect_os || return 1
+    fi
+    INFO "尝试安装用于 DNS 设置的 resolvconf/openresolv（可选）..."
+    case $PACKAGE_MANAGER in
+        "apt-get")
+            # Debian/Ubuntu 有 resolvconf；如失败可尝试 openresolv（第三方源情况较少）
+            apt-get update -y 2>/dev/null || true
+            apt-get install -y resolvconf 2>/dev/null || apt-get install -y openresolv 2>/dev/null || true
+            ;;
+        "yum"|"dnf")
+            $PACKAGE_MANAGER install -y openresolv 2>/dev/null || true
+            ;;
+        "zypper")
+            zypper install -y openresolv 2>/dev/null || true
+            ;;
+        "pacman")
+            pacman -Sy --noconfirm openresolv 2>/dev/null || true
+            ;;
+        "apk")
+            apk add --no-cache openresolv 2>/dev/null || true
+            ;;
+        "opkg")
+            opkg update 2>/dev/null || true
+            opkg install resolvconf 2>/dev/null || true
+            ;;
+    esac
+}
+
+
 ensure_qrencode() {
     command -v qrencode >/dev/null 2>&1 || install_qrencode || true
 }
@@ -2484,13 +2520,17 @@ install_wireguard_client() {
         return 1
     fi
 
+    # 确保必要命令依赖（非交互）
+    ensure_net_tools
+    ensure_resolvconf
+
     # 询问是否导入现有客户端配置
     echo
     read -p "是否导入现有的客户端配置文件(.conf)? (y/N): " import_now
     if [[ "$import_now" =~ ^[Yy]$ ]]; then
         import_client_config || WARN "导入配置失败，可稍后手动导入"
     else
-        INFO "您可以稍后将服务端生成的 <name>.conf 拷贝到 /etc/wireguard/ 并使用 wg-quick up 进行连接"
+        INFO "您可以稍后将服务端生成的 <name>.conf 放到任意路径，并在 /etc/wireguard 下创建软链接后执行 wg-quick up"
     fi
 }
 
@@ -2543,6 +2583,53 @@ import_client_config() {
     fi
 
     return 0
+}
+
+# 卸载WireGuard（客户端）
+uninstall_wireguard_client() {
+    echo -e "\n${Blue}=== 卸载 WireGuard 客户端 ===${Font}"
+
+    check_root
+    detect_os || return 1
+
+    # 尝试停止所有已存在的 wg-quick 接口（避免占用）
+    local ifaces
+    ifaces=$(wg show interfaces 2>/dev/null)
+    if [[ -n "$ifaces" ]]; then
+        for i in $ifaces; do
+            wg-quick down "$i" 2>/dev/null || true
+        done
+    fi
+
+    # 根据包管理器卸载 wireguard-tools / wireguard
+    case $PACKAGE_MANAGER in
+        "apt-get")
+            apt-get remove -y wireguard wireguard-tools 2>/dev/null || true
+            ;;
+        "yum")
+            yum remove -y wireguard-tools 2>/dev/null || true
+            ;;
+        "dnf")
+            dnf remove -y wireguard-tools 2>/dev/null || true
+            ;;
+        "zypper")
+            zypper remove -y wireguard-tools 2>/dev/null || true
+            ;;
+        "pacman")
+            pacman -R --noconfirm wireguard-tools 2>/dev/null || true
+            ;;
+        "apk")
+            apk del wireguard-tools 2>/dev/null || true
+            ;;
+        "opkg")
+            opkg remove wireguard-tools 2>/dev/null || true
+            ;;
+        *)
+            WARN "未知包管理器，无法自动卸载WireGuard客户端"
+            ;;
+    esac
+
+    INFO "WireGuard 客户端卸载流程完成（如有残留，请手动清理）"
 }
 
 
@@ -2725,19 +2812,20 @@ main_menu() {
         echo -e "———————————————————————————————————— \033[1;33mWireGuard 多隧道管理工具\033[0m —————————————————————————————————"
         echo -e "\033[1;36m                                        版本: ${SCRIPT_VERSION}\033[0m"
         echo -e "\n"
-        echo -e "\033[1;32m1、安装WireGuard/创建隧道\033[0m"
-        echo -e "\033[1;32m2、生成客户端配置\033[0m"
-        echo -e "\033[1;32m3、查看隧道状态\033[0m"
-        echo -e "\033[1;32m4、查看客户端配置\033[0m"
-        echo -e "\033[1;32m5、删除客户端配置\033[0m"
-        echo -e "\033[1;32m6、启动WireGuard隧道\033[0m"
-        echo -e "\033[1;32m7、停止WireGuard隧道\033[0m"
-        echo -e "\033[1;32m8、隧道管理\033[0m"
-        echo -e "\033[1;32m9、卸载WireGuard\033[0m"
-        echo -e "\033[1;32m10、客户端安装WireGuard或导入配置\033[0m"
+        echo -e "\033[1;32m1、安装WireGuard/创建隧道 - 服务端\033[0m"
+        echo -e "\033[1;32m2、安装WireGuard/加载配置 - 客户端\033[0m"
+        echo -e "\033[1;32m3、生成客户端配置\033[0m"
+        echo -e "\033[1;32m4、查看隧道状态\033[0m"
+        echo -e "\033[1;32m5、查看客户端配置\033[0m"
+        echo -e "\033[1;32m6、删除客户端配置\033[0m"
+        echo -e "\033[1;32m7、启动WireGuard隧道\033[0m"
+        echo -e "\033[1;32m8、停止WireGuard隧道\033[0m"
+        echo -e "\033[1;32m9、隧道管理\033[0m"
+        echo -e "\033[1;32m10、卸载WireGuard\033[0m"
+        echo -e "\033[1;32m11、卸载WireGuard（客户端）\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
-        read -p "请输入您的选择（1-10，按q退出）：" choice
+        read -p "请输入您的选择（1-11，按q退出）：" choice
 
         case "$choice" in
             1)
@@ -2767,32 +2855,35 @@ main_menu() {
                 fi
                 ;;
             2)
-                generate_client_config
+                install_wireguard_client
                 ;;
             3)
-                show_status
+                generate_client_config
                 ;;
             4)
-                show_client_config
+                show_status
                 ;;
             5)
-                delete_client
+                show_client_config
                 ;;
             6)
-                start_wireguard_menu
+                delete_client
                 ;;
             7)
-                stop_wireguard_menu
+                start_wireguard_menu
                 ;;
             8)
+                stop_wireguard_menu
+                ;;
+            9)
                 tunnel_management_menu
                 continue  # 从子菜单返回后直接继续，不显示"按任意键继续"
                 ;;
-            9)
+            10)
                 uninstall_wireguard
                 ;;
-            10)
-                install_wireguard_client
+            11)
+                uninstall_wireguard_client
                 ;;
             [Qq])
                 exit 0
