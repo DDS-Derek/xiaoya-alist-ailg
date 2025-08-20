@@ -4,7 +4,7 @@
 # 兼容xy_ailg.sh的日志风格
 
 # 脚本版本
-SCRIPT_VERSION="v0.2.3"
+SCRIPT_VERSION="v0.2.4"
 
 Green="\033[32m"
 Red="\033[31m"
@@ -995,6 +995,42 @@ ensure_curl() {
     command -v curl >/dev/null 2>&1 || ensure_pkg curl curl || true
 }
 
+# 尝试确保 resolvconf（或等效）用于处理 DNS（wg-quick 在有 DNS= 时会调用）
+ensure_resolvconf() {
+    # 如果已具备 resolvconf 或 systemd-resolved 的 resolvectl，则不处理
+    if command -v resolvconf >/dev/null 2>&1 || command -v resolvectl >/dev/null 2>&1; then
+        return 0
+    fi
+    if [[ -z "$PACKAGE_MANAGER" ]]; then
+        detect_os || return 1
+    fi
+    INFO "尝试安装用于 DNS 设置的 resolvconf/openresolv（可选）..."
+    case $PACKAGE_MANAGER in
+        "apt-get")
+            # Debian/Ubuntu 有 resolvconf；如失败可尝试 openresolv（第三方源情况较少）
+            apt-get update -y 2>/dev/null || true
+            apt-get install -y resolvconf 2>/dev/null || apt-get install -y openresolv 2>/dev/null || true
+            ;;
+        "yum"|"dnf")
+            $PACKAGE_MANAGER install -y openresolv 2>/dev/null || true
+            ;;
+        "zypper")
+            zypper install -y openresolv 2>/dev/null || true
+            ;;
+        "pacman")
+            pacman -Sy --noconfirm openresolv 2>/dev/null || true
+            ;;
+        "apk")
+            apk add --no-cache openresolv 2>/dev/null || true
+            ;;
+        "opkg")
+            opkg update 2>/dev/null || true
+            opkg install resolvconf 2>/dev/null || true
+            ;;
+    esac
+}
+
+
 ensure_qrencode() {
     command -v qrencode >/dev/null 2>&1 || install_qrencode || true
 }
@@ -1894,7 +1930,7 @@ generate_client_config() {
     local client_private=$(cat "${WG_KEYS_DIR}/${tunnel_name}_${client_name}_private.key")
     local server_public=$(cat "${WG_KEYS_DIR}/${tunnel_name}_server_public.key")
 
-    # 生成客户端配置文件
+    # 生成客户端配置文件（通用格式）
     cat > "$client_config_file" << EOF
 [Interface]
 PrivateKey = $client_private
@@ -2275,7 +2311,23 @@ show_status() {
             ;;
         "iptables")
             echo "iptables规则:"
-            iptables -L INPUT -n | grep -q "${WG_PORT}" && echo "端口${WG_PORT}: 已开放" || echo "端口${WG_PORT}: 未开放"
+            # 检查INPUT链的默认策略
+            local input_policy=$(iptables -L INPUT -n | head -1 | grep -o "policy [A-Z]*" | awk '{print $2}')
+            if [[ "$input_policy" == "ACCEPT" ]]; then
+                # 默认策略是ACCEPT，检查是否有明确的DROP/REJECT规则针对该端口
+                if iptables -L INPUT -n | grep -E "(DROP|REJECT)" | grep -q "${WG_PORT}"; then
+                    echo "端口${WG_PORT}: 被明确阻止"
+                else
+                    echo "端口${WG_PORT}: 已开放 (默认策略ACCEPT)"
+                fi
+            else
+                # 默认策略是DROP，检查是否有明确的ACCEPT规则
+                if iptables -L INPUT -n | grep -q "${WG_PORT}"; then
+                    echo "端口${WG_PORT}: 已开放"
+                else
+                    echo "端口${WG_PORT}: 未开放 (默认策略DROP)"
+                fi
+            fi
             iptables -L FORWARD -n -v | grep -q "${WG_INTERFACE}" && echo "转发规则: 已配置" || echo "转发规则: 未配置"
             ;;
         *)
@@ -2453,6 +2505,134 @@ show_client_config() {
     show_qrcode "$config_file" "${tunnel_name}_${client_name}"
 }
 
+# 安装WireGuard客户端（仅作为客户端使用）
+install_wireguard_client() {
+    echo -e "\n${Blue}=== 安装 WireGuard 客户端 ===${Font}"
+
+    check_root
+    detect_os || return 1
+
+    # 安装WireGuard工具
+    if install_wireguard; then
+        INFO "WireGuard 客户端组件安装完成"
+    else
+        ERROR "WireGuard 客户端安装失败"
+        return 1
+    fi
+
+    # 确保必要命令依赖（非交互）
+    ensure_net_tools
+    ensure_resolvconf
+
+    # 询问是否导入现有客户端配置
+    echo
+    read -p "是否导入现有的客户端配置文件(.conf)? (y/N): " import_now
+    if [[ "$import_now" =~ ^[Yy]$ ]]; then
+        import_client_config || WARN "导入配置失败，可稍后手动导入"
+    else
+        INFO "您可以将服务端生成客户端配置文件上传到本设备，重新运行脚本加载并启动配置！"
+    fi
+}
+
+# 导入客户端配置（Linux）
+import_client_config() {
+    echo -e "\n${Blue}=== 导入客户端配置 ===${Font}"
+
+    read -p "请输入本机上客户端配置文件的路径（例如 /root/wg-client.conf）: " src_path
+    if [[ -z "$src_path" ]] || [[ ! -f "$src_path" ]]; then
+        ERROR "文件不存在: $src_path"
+        return 1
+    fi
+
+    # 确保目录
+    WG_DIR="/etc/wireguard"
+    mkdir -p "$WG_DIR"
+
+    local base_name
+    base_name=$(basename "$src_path")
+    local dst_path="$WG_DIR/$base_name"
+
+    # 建立软链接指向源文件（不复制）
+    rm -f "$dst_path"
+    ln -s "$src_path" "$dst_path"
+    INFO "已创建到配置的软链接: $dst_path -> $src_path"
+
+    # 立即启动该配置
+    if wg-quick up "$dst_path"; then
+        INFO "已连接: $dst_path"
+        wg show || true
+    else
+        ERROR "连接失败，请检查配置"
+        return 1
+    fi
+
+    # 直接配置开机自启动（不交互）
+    detect_service_manager
+    detect_startup_method
+
+    # 解析接口名
+    local iface_name
+    iface_name=$(basename "$dst_path" .conf)
+    WG_INTERFACE="$iface_name"
+    WG_DIR="/etc/wireguard"
+
+    if setup_autostart; then
+        INFO "已尝试配置开机自启动"
+    else
+        WARN "开机自启动配置可能失败，请手动检查服务管理器设置"
+    fi
+
+    return 0
+}
+
+# 卸载WireGuard（客户端）
+uninstall_wireguard_client() {
+    echo -e "\n${Blue}=== 卸载 WireGuard 客户端 ===${Font}"
+
+    check_root
+    detect_os || return 1
+
+    # 尝试停止所有已存在的 wg-quick 接口（避免占用）
+    local ifaces
+    ifaces=$(wg show interfaces 2>/dev/null)
+    if [[ -n "$ifaces" ]]; then
+        for i in $ifaces; do
+            wg-quick down "$i" 2>/dev/null || true
+        done
+    fi
+
+    # 根据包管理器卸载 wireguard-tools / wireguard
+    case $PACKAGE_MANAGER in
+        "apt-get")
+            apt-get remove -y wireguard wireguard-tools 2>/dev/null || true
+            ;;
+        "yum")
+            yum remove -y wireguard-tools 2>/dev/null || true
+            ;;
+        "dnf")
+            dnf remove -y wireguard-tools 2>/dev/null || true
+            ;;
+        "zypper")
+            zypper remove -y wireguard-tools 2>/dev/null || true
+            ;;
+        "pacman")
+            pacman -R --noconfirm wireguard-tools 2>/dev/null || true
+            ;;
+        "apk")
+            apk del wireguard-tools 2>/dev/null || true
+            ;;
+        "opkg")
+            opkg remove wireguard-tools 2>/dev/null || true
+            ;;
+        *)
+            WARN "未知包管理器，无法自动卸载WireGuard客户端"
+            ;;
+    esac
+
+    INFO "WireGuard 客户端卸载流程完成（如有残留，请手动清理）"
+}
+
+
 # 卸载WireGuard
 uninstall_wireguard() {
     echo -e "\n${Blue}=== WireGuard 卸载确认 ===${Font}"
@@ -2514,6 +2694,8 @@ uninstall_wireguard() {
         INFO "卸载操作已取消"
         return 1
     fi
+
+
 
     # 第二次确认（如果有运行的隧道）
     if [[ ${#running_tunnels[@]} -gt 0 ]]; then
@@ -2628,20 +2810,22 @@ main_menu() {
     while true; do
         clear
         echo -e "———————————————————————————————————— \033[1;33mWireGuard 多隧道管理工具\033[0m —————————————————————————————————"
-        echo -e "\033[1;36m                                        版本: ${SCRIPT_VERSION}\033[0m"
+        echo -e "\033[1;36m                                     版本: ${SCRIPT_VERSION}  作者：AI老G\033[0m"
         echo -e "\n"
-        echo -e "\033[1;32m1、安装WireGuard/创建隧道\033[0m"
-        echo -e "\033[1;32m2、生成客户端配置\033[0m"
-        echo -e "\033[1;32m3、查看隧道状态\033[0m"
-        echo -e "\033[1;32m4、查看客户端配置\033[0m"
-        echo -e "\033[1;32m5、删除客户端配置\033[0m"
-        echo -e "\033[1;32m6、启动WireGuard隧道\033[0m"
-        echo -e "\033[1;32m7、停止WireGuard隧道\033[0m"
-        echo -e "\033[1;32m8、隧道管理\033[0m"
-        echo -e "\033[1;32m9、卸载WireGuard\033[0m"
+        echo -e "\033[1;32m1、安装WireGuard/创建隧道 - 服务端\033[0m"
+        echo -e "\033[1;32m2、安装WireGuard/加载配置 - 客户端\033[0m"
+        echo -e "\033[1;32m3、生成客户端配置\033[0m"
+        echo -e "\033[1;32m4、查看隧道状态\033[0m"
+        echo -e "\033[1;32m5、查看客户端配置\033[0m"
+        echo -e "\033[1;32m6、删除客户端配置\033[0m"
+        echo -e "\033[1;32m7、启动WireGuard隧道\033[0m"
+        echo -e "\033[1;32m8、停止WireGuard隧道\033[0m"
+        echo -e "\033[1;32m9、隧道管理\033[0m"
+        echo -e "\033[1;32m10、卸载WireGuard\033[0m"
+        echo -e "\033[1;32m11、卸载WireGuard（客户端）\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
-        read -p "请输入您的选择（1-9，按q退出）：" choice
+        read -p "请输入您的选择（1-11，按q退出）：" choice
 
         case "$choice" in
             1)
@@ -2671,29 +2855,35 @@ main_menu() {
                 fi
                 ;;
             2)
-                generate_client_config
+                install_wireguard_client
                 ;;
             3)
-                show_status
+                generate_client_config
                 ;;
             4)
-                show_client_config
+                show_status
                 ;;
             5)
-                delete_client
+                show_client_config
                 ;;
             6)
-                start_wireguard_menu
+                delete_client
                 ;;
             7)
-                stop_wireguard_menu
+                start_wireguard_menu
                 ;;
             8)
+                stop_wireguard_menu
+                ;;
+            9)
                 tunnel_management_menu
                 continue  # 从子菜单返回后直接继续，不显示"按任意键继续"
                 ;;
-            9)
+            10)
                 uninstall_wireguard
+                ;;
+            11)
+                uninstall_wireguard_client
                 ;;
             [Qq])
                 exit 0
@@ -2821,12 +3011,20 @@ detect_firewall() {
         fi
     # 检测iptables
     elif command -v iptables &> /dev/null; then
-        # 检查是否有自定义iptables规则
-        if iptables -L | grep -q "Chain INPUT (policy DROP)" || iptables -L INPUT | grep -v "ACCEPT.*0.0.0.0/0" | grep -q "ACCEPT\|DROP\|REJECT"; then
+        # 检查INPUT链的默认策略和规则数量
+        local input_policy=$(iptables -L INPUT -n | head -1 | grep -o "policy [A-Z]*" | awk '{print $2}')
+        local input_rules=$(iptables -L INPUT --line-numbers | wc -l)
+
+        # 如果默认策略是DROP，或者有自定义规则（超过3行：标题行+空行+默认规则），则认为防火墙启用
+        if [[ "$input_policy" == "DROP" ]] || [[ $input_rules -gt 3 ]]; then
             FIREWALL_TYPE="iptables"
-            INFO "检测到自定义iptables规则"
+            if [[ "$input_policy" == "DROP" ]]; then
+                INFO "检测到iptables防火墙 (默认策略: DROP)"
+            else
+                INFO "检测到iptables防火墙 (有自定义规则)"
+            fi
         else
-            INFO "检测到iptables但无严格规则"
+            INFO "检测到iptables但防火墙未启用 (默认策略: ACCEPT，无自定义规则)"
         fi
     else
         WARN "未检测到防火墙系统"
