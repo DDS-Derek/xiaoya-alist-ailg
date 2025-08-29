@@ -369,8 +369,13 @@ function user_emby_fast() {
             fi
 
             if $use_115_path; then
-                docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
-                    aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/115/${down_path}/$emby_ailg"
+                if [[ "${f4_select}" == "9" ]]; then
+                    docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
+                        aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/115/${down_path}/4.8.0.56/$emby_ailg"
+                else
+                    docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
+                        aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/115/${down_path}/$emby_ailg"
+                fi
             else
                 docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
                     aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg"
@@ -434,6 +439,8 @@ function user_emby_fast() {
         echo -e "\n"
         echo -e "\033[1;35m8、小雅JELLYFIN老G速装 - 10.9.6 - Lite版\033[0m"
         echo -e "\n"
+        echo -e "\033[1;35m9、小雅EMBY老G速装 - 115-Lite版 - 4.8.0.56（仅限用纯115安装）\033[0m"
+        echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
 
         read -erp "请输入您的选择（1-8，按b返回上级菜单或按q退出）：" f4_select
@@ -486,6 +493,12 @@ function user_emby_fast() {
             space_need=110
             break
             ;;
+        9)
+            emby_ailg="emby-ailg-lite-115.mp4"
+            emby_img="emby-ailg-lite-115.img"
+            space_need=120
+            break
+            ;;
         [Bb])
             clear
             main_menu
@@ -502,11 +515,20 @@ function user_emby_fast() {
         esac
     done
 
-    if [[ $st_gbox =~ "未安装" ]]; then
-        ERROR "请先安装G-Box，再执行本安装！"
-        read -erp -n 1 '按任意键返回主菜单'
-        main_menu
-        return
+    if [[ "${f4_select}" == "9" ]]; then
+        if [[ $st_alist =~ "未安装" ]]; then
+            ERROR "请先安装Alist，再执行本安装！"
+            read -erp -n 1 '按任意键返回主菜单'
+            main_menu
+            return
+        fi
+    else
+        if [[ $st_gbox =~ "未安装" ]]; then
+            ERROR "请先安装G-Box，再执行本安装！"
+            read -erp -n 1 '按任意键返回主菜单'
+            main_menu
+            return
+        fi
     fi
     umask 000
     [ -z "${config_dir}" ] && get_config_path
@@ -528,12 +550,12 @@ function user_emby_fast() {
         fi
     fi
 
-    if [[ "${f4_select}" == [1234] ]]; then
+    if [[ "${f4_select}" == [12349] ]]; then
         search_img="emby/embyserver|amilys/embyserver"
         del_name="emby"
         loop_order="/dev/loop7"
         down_path="emby"
-        [[ "${f4_select}" == [34] ]] && get_emby_image 4.9.0.38 || get_emby_image
+        [[ "${f4_select}" == [34] ]] && get_emby_image 4.9.0.38 || [[ "${f4_select}" == "9" ]] && get_emby_image 4.8.0.56 || get_emby_image
         init="run"
         # emd_name="xiaoya-emd"
         emd_name="xy-emd"
@@ -586,7 +608,11 @@ function user_emby_fast() {
     start_time=$(date +%s)
     for i in {1..5}; do
         if [[ $ok_115 =~ ^[Yy]$ ]]; then
-            remote_size=$(curl -sL -D - -o /dev/null --max-time 10 "$docker_addr/d/ailg_jf/115/${down_path}/$emby_ailg" | grep "Content-Length" | cut -d' ' -f2 | tail -n 1 | tr -d '\r')
+            if [[ "${f4_select}" == "9" ]]; then
+                remote_size=$(curl -sL -D - -o /dev/null --max-time 10 "$docker_addr/d/ailg_jf/115/${down_path}/4.8.0.56/$emby_ailg" | grep "Content-Length" | cut -d' ' -f2 | tail -n 1 | tr -d '\r')
+            else
+                remote_size=$(curl -sL -D - -o /dev/null --max-time 10 "$docker_addr/d/ailg_jf/115/${down_path}/$emby_ailg" | grep "Content-Length" | cut -d' ' -f2 | tail -n 1 | tr -d '\r')
+            fi
         else
             remote_size=$(curl -sL -D - -o /dev/null --max-time 10 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg" | grep "Content-Length" | cut -d' ' -f2 | tail -n 1 | tr -d '\r')
         fi
@@ -711,7 +737,14 @@ function user_emby_fast() {
         INFO "正在为您安装小雅元数据爬虫同步……"
         docker rm -f xiaoya-emd &> /dev/null
         docker stop ${emd_name} &> /dev/null
-        if update_ailg "ailg/xy-emd:latest"; then
+        # 根据架构选择镜像
+        if [[ $(uname -m) == "armv7l" ]]; then
+            emd_image="ailg/xy-emd:arm7-latest"
+        else
+            emd_image="ailg/xy-emd:latest"
+        fi
+        
+        if update_ailg "${emd_image}"; then
             xy_emby_sync
             if [ $? -eq 0 ]; then
                 INFO "小雅元数据同步爬虫安装成功！"
@@ -719,7 +752,7 @@ function user_emby_fast() {
                 INFO "小雅元数据同步爬虫安装失败，请重装安装！"
             fi
         else
-            ERROR "ailg/xy-emd:latest镜像更新失败，请检查网络后手动安装！" && exit 1
+            ERROR "${emd_image}镜像更新失败，请检查网络后手动安装！" && exit 1
         fi
     else
         INFO "安装完成，您选择不安装小雅爬虫同步！"
@@ -2479,6 +2512,7 @@ LOGO
 main_menu() {
     clear
     st_gbox=$(setup_status "$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)")
+    st_alist=$(setup_status "$(docker ps -a | grep -E 'ailg/alist' | awk '{print $NF}' | head -n1)")
     st_jf=$(setup_status "$(docker ps -a --format '{{.Names}}' | grep 'jellyfin_xy')")
     st_emby=$(setup_status "$(docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' emby |
         grep -qE "/xiaoya$ /media\b|\.img /media\.img" && echo 'emby')")
