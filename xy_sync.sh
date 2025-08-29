@@ -412,10 +412,17 @@ function xy_emby_sync() {
 
     docker_emd_name="$(docker ps -a | grep -E 'ailg/xy-emd' | awk '{print $NF}' | head -n1)"
     [ -n "${docker_emd_name}" ] && docker rm -f ${docker_emd_name}
-    if docker_pull ailg/xy-emd:latest; then
+    # 根据架构选择镜像
+    if [[ $(uname -m) == "armv7l" ]]; then
+        emd_image="ailg/xy-emd:arm7-latest"
+    else
+        emd_image="ailg/xy-emd:latest"
+    fi
+    
+    if docker_pull "${emd_image}"; then
         docker run -d --name xy-emd -e CYCLE="${sync_interval_input}" \
             -v "${mount_path}:/media.img" --privileged --net=host --restart=always \
-            ailg/xy-emd:latest --dirs "${output_string}" ${rebuild_env_var} ${clean_env_var} ${dns_env_var}
+            "${emd_image}" --dirs "${output_string}" ${rebuild_env_var} ${clean_env_var} ${dns_env_var}
         echo -e "小雅Emby爬虫G-Box专用版安装成功了！"
         return 0
     else
