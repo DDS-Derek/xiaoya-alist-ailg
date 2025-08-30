@@ -376,6 +376,7 @@ function user_emby_fast() {
                     docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
                         aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/115/${down_path}/$emby_ailg"
                 fi
+
             else
                 docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
                     aria2c -o /image/$emby_ailg --auto-file-renaming=false --allow-overwrite=true -c -x6 "$docker_addr/d/ailg_jf/${down_path}/$emby_ailg"
@@ -555,7 +556,13 @@ function user_emby_fast() {
         del_name="emby"
         loop_order="/dev/loop7"
         down_path="emby"
-        [[ "${f4_select}" == [34] ]] && get_emby_image 4.9.0.38 || [[ "${f4_select}" == "9" ]] && get_emby_image 4.8.0.56 || get_emby_image
+        if [[ "${f4_select}" == [34] ]]; then
+            get_emby_image 4.9.0.38
+        elif [[ "${f4_select}" == "9" ]]; then
+            get_emby_image 4.8.0.56
+        else
+            get_emby_image
+        fi
         init="run"
         # emd_name="xiaoya-emd"
         emd_name="xy-emd"
@@ -2575,3 +2582,4 @@ case $1 in
         main_menu
         ;;
 esac
+
