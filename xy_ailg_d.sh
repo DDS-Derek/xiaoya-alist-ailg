@@ -474,6 +474,9 @@ function user_emby_fast() {
             ERROR "媒体文件下载失败！"
             exit 1
         fi
+        
+        # 下载完成后获取本地文件大小
+        local_size=$(du -b $image_dir/$emby_ailg | cut -f1)
     }
 
     check_qnap
@@ -2881,8 +2884,7 @@ main_menu() {
     st_gbox=$(setup_status "$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)")
     st_alist=$(setup_status "$(docker ps -a | grep -E 'ailg/alist' | awk '{print $NF}' | head -n1)")
     st_jf=$(setup_status "$(docker ps -a --format '{{.Names}}' | grep 'jellyfin_xy')")
-    st_emby=$(setup_status "$(docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' emby |
-        grep -qE "/xiaoya$ /media\b|\.img /media\.img" && echo 'emby')")
+    st_emby=$(setup_status "$(docker ps -a --format '{{.Names}}' | grep -E '^emby$' | head -n1 | xargs -I {} sh -c 'docker inspect --format "{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}" {} | grep -qE "/xiaoya$ /media\b|\.img /media\.img" && echo {}')")
 
     logo
     echo -e "————————————————————————————————— \033[1;33m安  装  状  态\033[0m ——————————————————————————————————"
