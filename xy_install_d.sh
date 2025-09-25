@@ -127,19 +127,19 @@ download_file() {
         if eval "$download_cmd"; then
             if [ -s "/tmp/${file}" ]; then
                 case "$file" in
-                    "xy_ailg.sh")
+                    "xy_ailg_d.sh")
                         if grep -q "fuck_docker" "/tmp/${file}"; then
                             success=0
                             break
                         fi
                         ;;
-                    "xy_utils.sh")
+                    "xy_utils_d.sh")
                         if grep -q "setup_colors" "/tmp/${file}"; then
                             success=0
                             break
                         fi
                         ;;
-                    "xy_sync.sh")
+                    "xy_sync_d.sh")
                         if grep -q "xy_emby_sync" "/tmp/${file}"; then
                             success=0
                             break
