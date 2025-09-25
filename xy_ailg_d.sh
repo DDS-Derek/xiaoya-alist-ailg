@@ -806,7 +806,7 @@ function user_emby_fast() {
                 bash -c "exp_ailg \"/ailg/${emby_img}\" \"/mount_emby\" ${expand_size} || { echo '执行媒体库镜像扩容失败'; exit 1; }"
         else
             docker run -i --privileged --rm --net=host -v ${image_dir}:/ailg -v $media_dir:/mount_emby ailg/ggbond:latest \
-                bash -c "exp_ailg \"/ailg/${emby_img}\" \"/mount_emby\" ${expand_size} || { echo '执行媒体库镜像扩容失败'; exit 1; }"
+                bash -c "exp_ailg \"/ailg/${emby_ailg}\" \"/mount_emby\" ${expand_size} || { echo '执行媒体库镜像扩容失败'; exit 1; }"
         fi
     else
         INFO "本地已有镜像，无需重新下载！"
