@@ -399,6 +399,34 @@ function xy_emby_sync() {
         echo -e "\033[33m将为您使用默认DNS.\033[0m"
     fi
 
+    # --- 容器类型选择交互 ---
+    echo -e "\n\033[1;36m=== 容器类型配置 ===\033[0m"
+    echo -e "请选择您的媒体服务器类型："
+    echo -e "\033[32m1. Emby\033[0m"
+    echo -e "\033[33m2. Jellyfin\033[0m"
+    
+    local mode_choice=""
+    while true; do
+        read -p "请输入选择 [1-1，默认1]: " mode_choice
+        mode_choice=${mode_choice:-1}
+        
+        case "$mode_choice" in
+            1)
+                container_mode="emby"
+                echo -e "\033[32m已选择: Emby模式\033[0m"
+                break
+                ;;
+            2)
+                container_mode="jellyfin" 
+                echo -e "\033[33m已选择: Jellyfin模式\033[0m"
+                break
+                ;;
+            *)
+                echo -e "\033[31m错误: 请输入1或2\033[0m"
+                ;;
+        esac
+    done
+
     # --- Construct Final Directory String ---
     selected_dirs_array=()
     for dir in "${DIRS[@]}"; do
@@ -410,8 +438,32 @@ function xy_emby_sync() {
     output_string=$(printf "%s," "${selected_dirs_array[@]}")
     output_string=${output_string%,}
 
-    docker_emd_name="$(docker ps -a | grep -E 'ailg/xy-emd' | awk '{print $NF}' | head -n1)"
-    [ -n "${docker_emd_name}" ] && docker rm -f ${docker_emd_name}
+    # 找出所有使用ailg/xy-emd镜像的容器名
+    docker_emd_names="$(docker ps -a | grep -E 'ailg/xy-emd' | awk '{print $NF}')"
+    
+    # 根据用户选择的模式进行容器处理
+    for emd_name in $docker_emd_names; do
+        if [[ "${container_mode}" == "jellyfin" ]]; then
+            if [[ "$emd_name" == "xy-emd-jf" ]]; then
+                # Jellyfin模式下，清理xy-emd-jf容器
+                docker rm -f "$emd_name"
+                echo -e "\033[33m已清理旧容器：$emd_name\033[0m"
+            elif [[ "$emd_name" != "xy-emd" ]]; then
+                # 不是标准名称的容器，只停止不删除
+                docker stop "$emd_name" 2>/dev/null
+                echo -e "\033[36m已停止非标准名称容器：$emd_name\033[0m"
+            fi
+        else
+            # 默认emby模式
+            if [[ "$emd_name" == "xy-emd" ]]; then
+                docker rm -f "$emd_name"
+                echo -e "\033[33m已清理旧容器：$emd_name\033[0m"
+            elif [[ "$emd_name" != "xy-emd-jf" ]]; then
+                docker stop "$emd_name" 2>/dev/null
+                echo -e "\033[36m已停止非标准名称容器：$emd_name\033[0m"
+            fi
+        fi
+    done
     # 根据架构选择镜像
     if [[ $(uname -m) == "armv7l" ]]; then
         emd_image="ailg/xy-emd:arm7-latest"
@@ -419,8 +471,25 @@ function xy_emby_sync() {
         emd_image="ailg/xy-emd:latest"
     fi
     
+    # 根据用户选择设置MODE环境变量和容器名
+    local mode_env_var=""
+    local container_name=""
+    if [[ "${container_mode}" == "emby" ]]; then
+        mode_env_var="-e MODE=emby"
+        container_name="xy-emd"
+        echo -e "\033[32mxy-emd将使用Emby模式，容器名：${container_name}\033[0m"
+    elif [[ "${container_mode}" == "jellyfin" ]]; then
+        mode_env_var="-e MODE=jellyfin"
+        container_name="xy-emd-jf"
+        echo -e "\033[33mxy-emd将使用Jellyfin模式，容器名：${container_name}\033[0m"
+    else
+        mode_env_var="-e MODE=emby"
+        container_name="xy-emd"
+        echo -e "\033[33mxy-emd将使用默认emby模式，容器名：${container_name}\033[0m"
+    fi
+    
     if docker_pull "${emd_image}"; then
-        docker run -d --name xy-emd -e CYCLE="${sync_interval_input}" \
+        docker run -d --name "${container_name}" -e CYCLE="${sync_interval_input}" ${mode_env_var} \
             -v "${mount_path}:/media.img" --privileged --net=host --restart=always \
             "${emd_image}" --dirs "${output_string}" ${rebuild_env_var} ${clean_env_var} ${dns_env_var}
         echo -e "小雅Emby爬虫G-Box专用版安装成功了！"

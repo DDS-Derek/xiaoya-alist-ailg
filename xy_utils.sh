@@ -1315,6 +1315,8 @@ xy_media_reunzip() {
         fi
 
         mount_img || exit 1
+        
+        INFO "当前挂载模式: $mount_type"
         if [ -n "${emby_name}" ]; then
             if ! docker stop "${emby_name}" > /dev/null 2>&1; then
                 WARN "停止容器 ${emby_name} 失败"
@@ -1339,6 +1341,14 @@ xy_media_reunzip() {
         
         # Ask user to select which files to process
         echo -e "\n请选择要重新下载和解压的文件:"
+        
+        # 根据mount_type显示选择限制信息
+        if [[ "$mount_type" == "config" ]]; then
+            WARN "当前为config镜像挂载模式，只能选择 config.mp4 文件"
+        elif [[ "$mount_type" == "media" ]]; then
+            WARN "当前为媒体库镜像挂载模式，不能选择 config.mp4 文件"
+        fi
+        
         # 使用FILE_OPTIONS数组代替file_options
         # 初始化选择状态数组，0表示未选择，1表示已选择
         selected_status=()
@@ -1351,10 +1361,20 @@ xy_media_reunzip() {
             for index in "${!FILE_OPTIONS[@]}"; do
                 local file_opt="${FILE_OPTIONS[$index]}"
                 local status_char="×"; local color="$Red"
-                if [ "${selected_status[$index]}" -eq 1 ]; then 
+                local disabled=""
+                
+                # 检查选择限制
+                if [[ "$mount_type" == "config" && "$file_opt" != "config.mp4" ]]; then
+                    status_char="❌"; color="$Red"
+                    disabled=" (不可选择)"
+                elif [[ "$mount_type" == "media" && "$file_opt" == "config.mp4" ]]; then
+                    status_char="❌"; color="$Red"
+                    disabled=" (不可选择)"
+                elif [ "${selected_status[$index]}" -eq 1 ]; then 
                     status_char="√"; color="$Green"
                 fi
-                printf "[ %-1d ] ${color}[%s] %s${NC}\n" $((index + 1)) "$status_char" "$file_opt"
+                
+                printf "[ %-1d ] ${color}[%s] %s${NC}%s\n" $((index + 1)) "$status_char" "$file_opt" "$disabled"
             done
             printf "[ 0 ] 确认并继续\n"
             
@@ -1396,13 +1416,27 @@ xy_media_reunzip() {
                 
                 if [[ "$select_num" =~ ^[0-9]+$ ]]; then
                     if [ "$select_num" -ge 1 ] && [ "$select_num" -le ${#FILE_OPTIONS[@]} ]; then
-                        # 切换选择状态
                         idx=$((select_num-1))
-                        selected_status[$idx]=$((1 - selected_status[$idx]))
-                        if [ "${selected_status[$idx]}" -eq 1 ]; then
-                            INFO "已选择: ${FILE_OPTIONS[$idx]}"
-                        else
-                            INFO "已取消选择: ${FILE_OPTIONS[$idx]}"
+                        local file_to_select="${FILE_OPTIONS[$idx]}"
+                        
+                        # 检查选择合法性
+                        local selection_valid=true
+                        if [[ "$mount_type" == "config" && "$file_to_select" != "config.mp4" ]]; then
+                            ERROR "配置镜像模式下只能选择 config.mp4 文件"
+                            selection_valid=false
+                        elif [[ "$mount_type" == "media" && "$file_to_select" == "config.mp4" ]]; then
+                            ERROR "媒体库镜像模式下不能选择 config.mp4 文件"
+                            selection_valid=false
+                        fi
+                        
+                        # 如果选择合法，则切换选择状态
+                        if [ "$selection_valid" = true ]; then
+                            selected_status[$idx]=$((1 - selected_status[$idx]))
+                            if [ "${selected_status[$idx]}" -eq 1 ]; then
+                                INFO "已选择: ${FILE_OPTIONS[$idx]}"
+                            else
+                                INFO "已取消选择: ${FILE_OPTIONS[$idx]}"
+                            fi
                         fi
                     else 
                         ERROR "无效序号: $select_num，请输入1-${#FILE_OPTIONS[@]}之间的数字"
