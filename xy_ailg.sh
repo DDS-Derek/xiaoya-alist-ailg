@@ -2,8 +2,8 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2086
 
-source /tmp/xy_utils_d.sh
-source /tmp/xy_sync_d.sh
+source /tmp/xy_utils.sh
+source /tmp/xy_sync.sh
 
 PATH=${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH

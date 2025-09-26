@@ -77,13 +77,13 @@ fi
 # 清理函数
 cleanup() {
     local temp_files=(
-        "/tmp/xy_ailg_d.sh"
+        "/tmp/xy_ailg.sh"
         "/tmp/update_meta_jf.sh"
         "/tmp/share_resources.sh"
         "/tmp/sync_emby_config_ailg.sh"
         "/tmp/cronjob.tmp"
         "/tmp/cron.log"
-        "/tmp/xy_utils_d.sh"
+        "/tmp/xy_utils.sh"
     )
     
     for file in "${temp_files[@]}"; do
@@ -102,9 +102,9 @@ BASE_URLS=(
 )
 
 SCRIPT_FILES=(
-    "xy_ailg_d.sh"
-    "xy_utils_d.sh"
-    "xy_sync_d.sh"
+    "xy_ailg.sh"
+    "xy_utils.sh"
+    "xy_sync.sh"
 )
 
 # 下载脚本
@@ -127,19 +127,19 @@ download_file() {
         if eval "$download_cmd"; then
             if [ -s "/tmp/${file}" ]; then
                 case "$file" in
-                    "xy_ailg_d.sh")
+                    "xy_ailg.sh")
                         if grep -q "fuck_docker" "/tmp/${file}"; then
                             success=0
                             break
                         fi
                         ;;
-                    "xy_utils_d.sh")
+                    "xy_utils.sh")
                         if grep -q "setup_colors" "/tmp/${file}"; then
                             success=0
                             break
                         fi
                         ;;
-                    "xy_sync_d.sh")
+                    "xy_sync.sh")
                         if grep -q "xy_emby_sync" "/tmp/${file}"; then
                             success=0
                             break
@@ -161,22 +161,22 @@ INFO "正在初始化，请稍后..."
 for file in "${SCRIPT_FILES[@]}"; do
     if download_file "$file"; then
         case "$file" in
-            "xy_ailg_d.sh") download_success=1 ;;
-            "xy_utils_d.sh") utils_success=1 ;;
-            "xy_sync_d.sh") sync_success=1 ;;
+            "xy_ailg.sh") download_success=1 ;;
+            "xy_utils.sh") utils_success=1 ;;
+            "xy_sync.sh") sync_success=1 ;;
         esac
     fi
 done
 
 if [ $download_success -eq 1 ] && [ $utils_success -eq 1 ] && [ $sync_success -eq 1 ]; then
     # 添加执行权限
-    chmod +x /tmp/xy_ailg_d.sh
-    chmod +x /tmp/xy_utils_d.sh
-    chmod +x /tmp/xy_sync_d.sh
+    chmod +x /tmp/xy_ailg.sh
+    chmod +x /tmp/xy_utils.sh
+    chmod +x /tmp/xy_sync.sh
     
     # 执行主脚本
     INFO "初始化完成..."
-    bash /tmp/xy_ailg_d.sh "$@"
+    bash /tmp/xy_ailg.sh "$@"
     
 else
     ERROR "脚本下载失败,请检查网络连接后重试!"
