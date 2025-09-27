@@ -816,10 +816,10 @@ function user_emby_fast() {
     mount | grep $config_mount_dir && umount $config_mount_dir
     if [ -f "$image_dir_config/$emby_img_config" ]; then
         docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
-            bash -c "exp_ailg \"/ailg_config/${emby_img_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行config镜像扩容失败'; exit 1; }"
+            bash -c "strmhelper \"/ailg_config/${emby_img_config}\" \"/mount_config\" \"${strmhelper_mode}\" && exp_ailg \"/ailg_config/${emby_img_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行strmhelper失败'; exit 1; }"
     elif [ -f "$image_dir_config/$emby_ailg_config" ]; then
         docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
-            bash -c "exp_ailg \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行config镜像扩容失败'; exit 1; }"
+            bash -c "strmhelper \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" \"${strmhelper_mode}\" && exp_ailg \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行strmhelper失败'; exit 1; }"
     fi
 
     if [ ! -f /usr/bin/mount_ailg ]; then
