@@ -823,7 +823,6 @@ function user_emby_fast() {
     fi
 
     # 处理配置文件镜像
-    INFO "条件匹配：local_config_size($local_config_size) == remote_config_size($remote_config_size)"
     mount | grep $config_mount_dir && umount $config_mount_dir
     if [ -n "$local_config_size" ] && [ -n "$remote_config_size" ] && [ "$local_config_size" -eq "$remote_config_size" ]; then
         if [ -f "$image_dir_config/$emby_img_config" ]; then
@@ -833,7 +832,7 @@ function user_emby_fast() {
         elif [ -f "$image_dir_config/$emby_ailg_config" ]; then
             INFO "开始解压配置文件镜像..."
             docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
-                bash -c "strmhelper \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" \"${strmhelper_mode}\" && exp_ailg \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行strmhelper失败'; exit 1; }"
+                bash -c "strmhelper \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" \"${strmhelper_mode}\" && exp_ailg \"/ailg_config/${emby_img_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行strmhelper失败'; exit 1; }"
         else
             WARN "配置文件镜像不存在，跳过处理"
         fi
