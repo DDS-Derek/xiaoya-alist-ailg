@@ -2063,7 +2063,8 @@ get_legacy_img_path() {
                 legacy_img_path=""
                 for entry in "${emby_list[@]}"; do
                     if [[ $entry == $legacy_emby_name:* ]]; then
-                        legacy_img_path=${entry#*:}
+                        # 提取媒体库路径（第二个字段）
+                        legacy_img_path=$(echo "$entry" | cut -d':' -f2)
                         break
                     fi
                 done
