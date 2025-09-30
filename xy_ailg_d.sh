@@ -2,8 +2,8 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2086
 
-source /tmp/xy_utils_d.sh
-source /tmp/xy_sync_d.sh
+source /tmp/xy_utils.sh
+source /tmp/xy_sync.sh
 
 PATH=${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
@@ -811,12 +811,20 @@ function user_emby_fast() {
 
     # 处理配置文件镜像
     mount | grep $config_mount_dir && umount $config_mount_dir
-    if [ -f "$image_dir_config/$emby_img_config" ]; then
-        docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
-            bash -c "strmhelper \"/ailg_config/${emby_img_config}\" \"/mount_config\" \"${strmhelper_mode}\" && exp_ailg \"/ailg_config/${emby_img_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行strmhelper失败'; exit 1; }"
-    elif [ -f "$image_dir_config/$emby_ailg_config" ]; then
-        docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
-            bash -c "strmhelper \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" \"${strmhelper_mode}\" && exp_ailg \"/ailg_config/${emby_img_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行strmhelper失败'; exit 1; }"
+    if [ -n "$local_config_size" ] && [ -n "$remote_config_size" ] && [ "$local_config_size" -eq "$remote_config_size" ]; then
+        if [ -f "$image_dir_config/$emby_img_config" ]; then
+            INFO "开始处理配置文件镜像..."
+            docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
+                bash -c "strmhelper \"/ailg_config/${emby_img_config}\" \"/mount_config\" \"${strmhelper_mode}\" && exp_ailg \"/ailg_config/${emby_img_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行strmhelper失败'; exit 1; }"
+        elif [ -f "$image_dir_config/$emby_ailg_config" ]; then
+            INFO "开始解压配置文件镜像..."
+            docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
+                bash -c "strmhelper \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" \"${strmhelper_mode}\" && exp_ailg \"/ailg_config/${emby_ailg_config}\" \"/mount_config\" ${expand_size_config} || { echo '执行strmhelper失败'; exit 1; }"
+        else
+            WARN "配置文件镜像不存在，跳过处理"
+        fi
+    else
+        INFO "本地已有配置文件镜像，无需重新处理！"
     fi
 
     if [ ! -f /usr/bin/mount_ailg ]; then
@@ -2032,7 +2040,16 @@ get_legacy_img_path() {
                     break
                 fi
             done
-            printf "[ %-1d ] 容器名: \033[1;33m%-20s\033[0m 媒体库路径: \033[1;33m%s\033[0m\n" $((index + 1)) $name $host_path
+            # 分离媒体库和config镜像路径
+            media_path=""
+            config_path=""
+            if [[ "$host_path" == *":"* ]]; then
+                media_path="${host_path%%:*}"
+                config_path="${host_path#*:}"
+                printf "[ %-1d ] 容器名: \033[1;33m%-20s\033[0m 媒体库路径: \033[1;33m%s\033[0m config镜像路径: \033[1;33m%s\033[0m\n" $((index + 1)) $name $media_path $config_path
+            else
+                printf "[ %-1d ] 容器名: \033[1;33m%-20s\033[0m 媒体库路径: \033[1;33m%s\033[0m\n" $((index + 1)) $name $host_path
+            fi
         done
         printf "[ 0 ] \033[1;33m手动输入需要重建的老G速装版镜像的完整路径\n\033[0m"
         
@@ -2115,6 +2132,25 @@ stop_and_remove_containers() {
         docker stop "$legacy_emby_name" > /dev/null 2>&1
         docker rm "$legacy_emby_name" > /dev/null 2>&1
         INFO "容器 $legacy_emby_name 已删除"
+    else
+        # 手动输入路径时，清理可能存在的默认容器名
+        INFO "清理可能存在的默认容器..."
+        
+        # 检查并清理emby容器
+        if docker ps -a --format '{{.Names}}' | grep -q "^emby$"; then
+            INFO "发现emby容器，正在删除..."
+            docker stop emby > /dev/null 2>&1
+            docker rm emby > /dev/null 2>&1
+            INFO "emby容器已删除"
+        fi
+        
+        # 检查并清理jellyfin_xy容器
+        if docker ps -a --format '{{.Names}}' | grep -q "^jellyfin_xy$"; then
+            INFO "发现jellyfin_xy容器，正在删除..."
+            docker stop jellyfin_xy > /dev/null 2>&1
+            docker rm jellyfin_xy > /dev/null 2>&1
+            INFO "jellyfin_xy容器已删除"
+        fi
     fi
     
     # 停止和删除爬虫容器
@@ -2727,7 +2763,7 @@ function sync_plan() {
         3)
             docker_name="$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)"
             if [ -n "${docker_name}" ]; then
-                /bin/bash -c "$(curl -sSLf https://ailg.ggbond.org/xy_install_d.sh)" -s g-box
+                /bin/bash -c "$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)" -s g-box
             else
                 ERROR "未找到G-Box容器，请先安装G-Box！"
             fi
@@ -2771,7 +2807,7 @@ function sync_plan() {
     [ -z "${config_dir}" ] && ERROR "未找到${docker_name}的挂载目录，请检查！" && exit 1
     if command -v crontab >/dev/null 2>&1; then
         crontab -l | grep -v xy_install > /tmp/cronjob.tmp
-        echo "$minu $hour */${sync_day} * * /bin/bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install_d.sh)\" -s g-box | tee ${config_dir}/cron.log" >> /tmp/cronjob.tmp
+        echo "$minu $hour */${sync_day} * * /bin/bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)\" -s g-box | tee ${config_dir}/cron.log" >> /tmp/cronjob.tmp
         crontab /tmp/cronjob.tmp
         chmod 777 ${config_dir}/cron.log
         echo -e "\n"
@@ -2789,7 +2825,7 @@ function sync_plan() {
         echo -e "\033[1;35m已创建/etc/crontab.bak备份文件！\033[0m"
         
         sed -i '/xy_install/d' /etc/crontab
-        echo "$minu $hour */${sync_day} * * root /bin/bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install_d.sh)\" -s g-box | tee ${config_dir}/cron.log" >> /etc/crontab
+        echo "$minu $hour */${sync_day} * * root /bin/bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)\" -s g-box | tee ${config_dir}/cron.log" >> /etc/crontab
         chmod 777 ${config_dir}/cron.log
         echo -e "\n"
         echo -e "———————————————————————————————————— \033[1;33mA  I  老  G\033[0m —————————————————————————————————"
