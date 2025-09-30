@@ -787,8 +787,18 @@ function user_emby_fast() {
             ERROR "配置文件下载失败！"
             exit 1
         fi
+        # 下载完成后重新获取本地文件大小
+        local_config_size=$(du -b $image_dir_config/$emby_ailg_config | cut -f1)
     else
-        local_config_size=$(du -b $image_dir_config/$emby_img_config | cut -f1)
+        # 优先检查.mp4文件，如果不存在再检查.img文件
+        if [ -f "$image_dir_config/$emby_ailg_config" ]; then
+            local_config_size=$(du -b $image_dir_config/$emby_ailg_config | cut -f1)
+        elif [ -f "$image_dir_config/$emby_img_config" ]; then
+            local_config_size=$(du -b $image_dir_config/$emby_img_config | cut -f1)
+        else
+            local_config_size=""
+        fi
+        
         if [ -n "$remote_config_size" ] && [ "$local_config_size" -lt "$remote_config_size" ]; then
             down_config_img
             if [ $? -ne 0 ]; then
@@ -815,6 +825,8 @@ function user_emby_fast() {
     # 处理配置文件镜像
     mount | grep $config_mount_dir && umount $config_mount_dir
     if [ -n "$local_config_size" ] && [ -n "$remote_config_size" ] && [ "$local_config_size" -eq "$remote_config_size" ]; then
+        INFO "本地已有配置文件镜像，无需重新处理！"
+    else
         if [ -f "$image_dir_config/$emby_img_config" ]; then
             INFO "开始处理配置文件镜像..."
             docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
@@ -826,8 +838,6 @@ function user_emby_fast() {
         else
             WARN "配置文件镜像不存在，跳过处理"
         fi
-    else
-        INFO "本地已有配置文件镜像，无需重新处理！"
     fi
 
     if [ ! -f /usr/bin/mount_ailg ]; then
