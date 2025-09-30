@@ -98,6 +98,7 @@ function get_emby_happy_image() {
 function get_config_path() {
     images=("ailg/alist" "xiaoyaliu/alist" "ailg/g-box")
     results=()
+    local container_name  # 声明为局部变量
     for image in "${images[@]}"; do
         while IFS= read -r line; do
             container_name=$(echo $line | awk '{print $NF}')
@@ -240,6 +241,8 @@ get_emby_status() {
     fi
     docker ps -a | grep -E "${search_img}" | awk '{print $1}' > "$temp_file"
 
+    local container_name  # 声明为局部变量
+    local image_name      # 声明为局部变量
     while read -r container_id; do
         if docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' $container_id | grep -qE "/xiaoya$ /media|\.img /media\.img"; then
             # 检查镜像名是否包含emby
