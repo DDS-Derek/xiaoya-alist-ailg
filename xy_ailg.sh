@@ -823,10 +823,9 @@ function user_emby_fast() {
     fi
 
     # 处理配置文件镜像
+    INFO "条件匹配：local_config_size($local_config_size) == remote_config_size($remote_config_size)"
     mount | grep $config_mount_dir && umount $config_mount_dir
     if [ -n "$local_config_size" ] && [ -n "$remote_config_size" ] && [ "$local_config_size" -eq "$remote_config_size" ]; then
-        INFO "本地已有配置文件镜像，无需重新处理！"
-    else
         if [ -f "$image_dir_config/$emby_img_config" ]; then
             INFO "开始处理配置文件镜像..."
             docker run -i --privileged --rm --net=host -v ${image_dir_config}:/ailg_config -v $config_mount_dir:/mount_config ailg/ggbond:latest \
@@ -838,6 +837,8 @@ function user_emby_fast() {
         else
             WARN "配置文件镜像不存在，跳过处理"
         fi
+    else
+        INFO "本地已有配置文件镜像，无需重新处理！"
     fi
 
     if [ ! -f /usr/bin/mount_ailg ]; then
