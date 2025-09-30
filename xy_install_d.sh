@@ -78,12 +78,13 @@ fi
 cleanup() {
     local temp_files=(
         "/tmp/xy_ailg_d.sh"
+        "/tmp/xy_utils_d.sh"
+        "/tmp/xy_sync_d.sh"
         "/tmp/update_meta_jf.sh"
         "/tmp/share_resources.sh"
         "/tmp/sync_emby_config_ailg.sh"
         "/tmp/cronjob.tmp"
         "/tmp/cron.log"
-        "/tmp/xy_utils_d.sh"
     )
     
     for file in "${temp_files[@]}"; do

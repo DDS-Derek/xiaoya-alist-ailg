@@ -24,6 +24,7 @@
 # - 系统检查和依赖安装
 # - 通用工具函数
 # - Docker相关操作
+# - Emby 6908端口屏蔽功能（从DDS大佬脚本移植而来）
 #
 # Copyright (c) 2025 AI老G <https://space.bilibili.com/252166818>
 # ——————————————————————————————————————————————————————————————————————————————————
@@ -98,7 +99,7 @@ check_env() {
     fi
 
     if ! grep -q 'alias gbox' /etc/profile; then
-        echo -e "alias gbox='bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)\"'" >> /etc/profile
+        echo -e "alias gbox='bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install_d.sh)\"'" >> /etc/profile
     fi
     source /etc/profile
 
@@ -383,58 +384,51 @@ check_loop_support() {
         fi
     fi
 
-    if ls -al /dev/loop7 > /dev/null 2>&1; then
-        if losetup /dev/loop7; then
-            imgs=("emby-ailg.img" "emby-ailg-lite.img" "jellyfin-ailg.img" "jellyfin-ailg-lite.img" "emby-ailg-115.img" "emby-ailg-lite-115.img" "media.img" "/")
-            contains=false
-            for img in "${imgs[@]}"; do
-                if [ "$img" = "/" ]; then
-                    if losetup /dev/loop7 | grep -q "^/$"; then
-                        contains=true
-                        break
-                    fi
-                else
-                    if losetup /dev/loop7 | grep -q "$img"; then
-                        contains=true
-                        break
-                    fi
-                fi
-            done
-
-            if [ "$contains" = false ]; then
-                ERROR "您系统的/dev/loop7设备已被占用，可能是你没有用脚本卸载手动删除了emby的img镜像文件！"
-                ERROR "请手动卸载后重装运行脚本安装！不会就删掉爬虫容后重启宿主机设备，再运行脚本安装！" && exit 1
-            fi
-        else
-            for i in {1..3}; do
-                curl -o /tmp/loop_test.img https://ailg.ggbond.org/loop_test.img
-                if [ -f /tmp/loop_test.img ] && [ $(stat -c%s /tmp/loop_test.img) -gt 1024000 ]; then
-                    break
-                else
-                    rm -f /tmp/loop_test.img
-                fi
-            done
-            if [ ! -f /tmp/loop_test.img ] || [ $(stat -c%s /tmp/loop_test.img) -le 1024000 ]; then
-                ERROR "测试文件下载失败，请检查网络后重新运行脚本！" && exit 1
-            fi
-            if ! losetup -o 35 /dev/loop7 /tmp/loop_test.img > /dev/null 2>&1; then
-                ERROR "您的系统环境不支持直接挂载loop回循设备，无法安装速装版emby/jellyfin，建议排查losetup命令后重新运行脚本安装！或用DDS大佬脚本安装原版小雅emby！"
-                rm -rf /tmp/loop_test.img
-                exit 1
-            else
-                mkdir -p /tmp/loop_test
-                if ! mount /dev/loop7 /tmp/loop_test; then
-                    ERROR "您的系统环境不支持直接挂载loop回循设备，无法安装速装版emby/jellyfin，建议排查mount命令后重新运行脚本安装！或用DDS大佬脚本安装原版小雅emby！"
-                    rm -rf /tmp/loop_test /tmp/loop_test.img
-                    exit 1
-                else
-                    umount /tmp/loop_test
-                    losetup -d /dev/loop7
-                    rm -rf /tmp/loop_test /tmp/loop_test.img
-                    return 0
-                fi
+    # 动态获取可用的loop设备进行测试
+    test_loop_device=""
+    
+    # 尝试使用 losetup -f 获取下一个可用的loop设备
+    if test_loop_device=$(losetup -f 2>/dev/null) && [ -n "$test_loop_device" ]; then
+        # 检查设备是否存在，如果不存在则创建
+        if [ ! -e "$test_loop_device" ]; then
+            loop_num=$(echo "$test_loop_device" | grep -o '[0-9]\+$')
+            if ! mknod "$test_loop_device" b 7 "$loop_num" 2>/dev/null; then
+                test_loop_device=""
             fi
         fi
+    fi
+    
+    if [ -n "$test_loop_device" ]; then
+        for i in {1..3}; do
+            curl -o /tmp/loop_test.img https://ailg.ggbond.org/loop_test.img
+            if [ -f /tmp/loop_test.img ] && [ $(stat -c%s /tmp/loop_test.img) -gt 1024000 ]; then
+                break
+            else
+                rm -f /tmp/loop_test.img
+            fi
+        done
+        if [ ! -f /tmp/loop_test.img ] || [ $(stat -c%s /tmp/loop_test.img) -le 1024000 ]; then
+            ERROR "测试文件下载失败，请检查网络后重新运行脚本！" && exit 1
+        fi
+        if ! losetup -o 35 "$test_loop_device" /tmp/loop_test.img > /dev/null 2>&1; then
+            ERROR "您的系统环境不支持直接挂载loop回循设备，无法安装速装版emby/jellyfin，建议排查losetup命令后重新运行脚本安装！或用DDS大佬脚本安装原版小雅emby！"
+            rm -rf /tmp/loop_test.img
+            exit 1
+        else
+            mkdir -p /tmp/loop_test
+            if ! mount "$test_loop_device" /tmp/loop_test; then
+                ERROR "您的系统环境不支持直接挂载loop回循设备，无法安装速装版emby/jellyfin，建议排查mount命令后重新运行脚本安装！或用DDS大佬脚本安装原版小雅emby！"
+                rm -rf /tmp/loop_test /tmp/loop_test.img
+                exit 1
+            else
+                umount /tmp/loop_test
+                losetup -d "$test_loop_device"
+                rm -rf /tmp/loop_test /tmp/loop_test.img
+                return 0
+            fi
+        fi
+    else
+        ERROR "无法找到可用的loop设备进行测试，请检查系统loop设备支持！" && exit 1
     fi
 }
 
@@ -1523,9 +1517,271 @@ setup_colors
 # 导出颜色变量
 export Blue Green Red Yellow NC INFO ERROR WARN
 
+# ——————————————————————————————————————————————————————————————————————————————————
+# Emby 6908端口屏蔽功能
+# ——————————————————————————————————————————————————————————————————————————————————
+
+# 获取docker0网桥IP
+get_docker0_ip() {
+    if command -v ifconfig > /dev/null 2>&1; then
+        docker0=$(ifconfig docker0 | awk '/inet / {print $2}' | sed 's/addr://')
+    else
+        docker0=$(ip addr show docker0 | awk '/inet / {print $2}' | cut -d '/' -f 1)
+    fi
+    echo "$docker0"
+}
+
+# 等待Emby容器启动
+wait_emby_start() {
+    local container_name="$1"
+    local TARGET_LOG_LINE_SUCCESS="All entry points have started"
+    local start_time=$(date +%s)
+    
+    INFO "等待Emby容器 ${container_name} 启动..."
+    while true; do
+        local line=$(docker logs "$container_name" 2>&1 | tail -n 10)
+        echo -e "$line"
+        local current_time=$(date +%s)
+        local elapsed_time=$((current_time - start_time))
+        
+        if [[ "$line" == *"$TARGET_LOG_LINE_SUCCESS"* ]] && [ "$elapsed_time" -gt 60 ]; then
+            INFO "Emby容器 ${container_name} 启动成功！"
+            return 0
+        fi
+        
+        if [ "$elapsed_time" -gt 900 ]; then
+            WARN "Emby容器 ${container_name} 未正常启动超时 15 分钟！"
+            return 1
+        fi
+        sleep 8
+    done
+}
+
+# 等待G-Box容器启动
+wait_gbox_start() {
+    local container_name="$1"
+    local TARGET_LOG_LINE_SUCCESS="load storages completed"
+    local start_time=$(date +%s)
+    
+    INFO "等待G-Box容器 ${container_name} 启动..."
+    while true; do
+        local line=$(docker exec "$container_name" tail -n 10 /opt/alist/log/alist.log 2>&1)
+        echo -e "$line"
+        local current_time=$(date +%s)
+        local elapsed_time=$((current_time - start_time))
+        
+        if [[ "$line" == *"$TARGET_LOG_LINE_SUCCESS"* ]]; then
+            INFO "G-Box容器 ${container_name} 启动成功！"
+            return 0
+        fi
+        
+        if [ "$elapsed_time" -gt 600 ]; then
+            WARN "G-Box容器 ${container_name} 未正常启动超时 10 分钟！"
+            return 1
+        fi
+        sleep 8
+    done
+}
+
+# Emby 6908端口屏蔽功能
+emby_close_6908_port() {
+    echo -e "${Yellow}此功能关闭 6908 访问是通过将 Emby 设置为桥接模式并取消端口映射，非防火墙屏蔽！！！${Font}"
+    echo -e "${Yellow}如果您使用此功能关闭 6908 访问，那您无法再使用浏览器访问 6908 端口使用 Emby！！！${Font}"
+    echo -e "${Yellow}如果您需要访问 Emby 并且走服务端流量，可以访问 2347 端口，此端口与 6908 逻辑一致！！！${Font}"
+    echo -e "${Yellow}正常使用依旧是访问 2345 端口即可愉快观影！！！${Font}"
+    echo -e "${Yellow}此功能移植自DDSREM大佬的脚本，特此感谢DDSREM！${Font}"
+    
+    local OPERATE
+    while true; do
+        INFO "是否继续操作 [Y/n]（默认 Y）"
+        read -erp "OPERATE:" OPERATE
+        [[ -z "${OPERATE}" ]] && OPERATE="y"
+        if [[ ${OPERATE} == [YyNn] ]]; then
+            break
+        else
+            ERROR "非法输入，请输入 [Y/n]"
+        fi
+    done
+    if [[ "${OPERATE}" == [Nn] ]]; then
+        return 0
+    fi
+
+    # 获取G-Box容器名称和配置目录
+    get_config_path
+    local gbox_name="$docker_name"
+    local config_dir="$config_dir"
+    
+    # 获取Emby容器名称（通过挂载/media.img的特征查找，且镜像名包含emby）
+    local emby_name="$(docker ps -a -q | while read container_id; do
+        if docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' "$container_id" | grep -qE "/xiaoya$ /media|\.img /media\.img"; then
+            # 检查镜像名是否包含emby
+            image_name=$(docker inspect --format '{{.Config.Image}}' "$container_id")
+            if [[ "$image_name" == *"emby"* ]]; then
+                container_name=$(docker ps -a --format '{{.Names}}' --filter "id=$container_id")
+                echo "$container_name"
+                break
+            fi
+        fi
+    done | head -n1)"
+    
+    # 如果没找到，使用默认名称
+    emby_name=${emby_name:-emby}
+    
+    INFO "检测到G-Box容器: ${gbox_name}"
+    INFO "检测到Emby容器: ${emby_name}"
+    INFO "使用配置目录: ${config_dir}"
+
+    # 创建独立网络
+    local NETWORK_NAME="only_for_emby"
+    local SUBNET_CANDIDATES=("10.250.0.0/24" "10.250.1.0/24" "10.250.2.0/24" "10.251.0.0/24")
+    local AVAILABLE_SUBNET ENBY_IP GATEWAY
+    
+    # 删除已存在的网络
+    if docker network inspect "$NETWORK_NAME" > /dev/null 2>&1; then
+        local CONTAINERS=$(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$NETWORK_NAME")
+        if [ -n "$CONTAINERS" ]; then
+            INFO "以下容器正在使用该网络，将被强制断开:"
+            INFO "$CONTAINERS"
+            for container in $CONTAINERS; do
+                INFO "正在断开容器 $container ..."
+                docker network disconnect -f "$NETWORK_NAME" "$container"
+            done
+        fi
+        docker network rm "$NETWORK_NAME"
+        INFO "旧 ${NETWORK_NAME} 网络已删除"
+    fi
+
+    # 查找可用子网
+    for subnet in "${SUBNET_CANDIDATES[@]}"; do
+        local conflict=0
+        local existing_networks config
+        existing_networks=$(docker network ls --quiet)
+        for net_id in $existing_networks; do
+            config=$(docker network inspect "$net_id" --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+            if [ "$config" = "$subnet" ]; then
+                conflict=1
+                break
+            fi
+        done
+        if [ "$conflict" -eq 0 ]; then
+            AVAILABLE_SUBNET="$subnet"
+            break
+        fi
+    done
+    
+    if [ -z "$AVAILABLE_SUBNET" ]; then
+        ERROR "所有候选子网均已被占用，请手动删除冲突的子网"
+        return 1
+    fi
+    
+    GATEWAY="${AVAILABLE_SUBNET//0\/24/1}"
+    ENBY_IP="${AVAILABLE_SUBNET//0\/24/100}"
+    
+    INFO "正在创建网络 $NETWORK_NAME，使用子网 $AVAILABLE_SUBNET，网关 $GATEWAY..."
+    docker network create \
+        --driver bridge \
+        --subnet "$AVAILABLE_SUBNET" \
+        --gateway "$GATEWAY" \
+        "$NETWORK_NAME"
+    INFO "网络 $NETWORK_NAME 创建成功！"
+
+    # 拉取runlike镜像
+    if docker inspect ddsderek/runlike:latest > /dev/null 2>&1; then
+        local local_sha remote_sha
+        local_sha=$(docker inspect --format='{{index .RepoDigests 0}}' ddsderek/runlike:latest 2> /dev/null | cut -f2 -d:)
+        remote_sha=$(curl -s -m 10 "https://hub.docker.com/v2/repositories/ddsderek/runlike/tags/latest" | grep -o '"digest":"[^"]*' | grep -o '[^"]*$' | tail -n1 | cut -f2 -d:)
+        if [ "$local_sha" != "$remote_sha" ]; then
+            docker rmi ddsderek/runlike:latest
+            docker_pull "ddsderek/runlike:latest"
+        fi
+    else
+        docker_pull "ddsderek/runlike:latest"
+    fi
+    
+    # 获取容器配置
+    INFO "获取 ${emby_name} 容器信息中..."
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp ddsderek/runlike -p "${emby_name}" > "/tmp/container_update_${emby_name}"
+    
+    # 修改网络配置
+    INFO "更改 Emby 为 only_for_emby 模式并取消端口映射中..."
+    if grep -q 'network=host' "/tmp/container_update_${emby_name}"; then
+        INFO "更改 host 网络模式为 only_for_emby 模式"
+        sed -i "s/network=host/network=only_for_emby --ip=${ENBY_IP}/" "/tmp/container_update_${emby_name}"
+    elif grep -q 'network=only_for_emby' "/tmp/container_update_${emby_name}"; then
+        INFO "重新配置 only_for_emby 网络模式"
+        sed -i "s/network=bridge/network=only_for_emby --ip=${ENBY_IP}/" "/tmp/container_update_${emby_name}"
+    else
+        INFO "添加 only_for_emby 网络模式"
+        sed -i "s/name=${emby_name}/name=${emby_name} --network=only_for_emby --ip=${ENBY_IP}/" "/tmp/container_update_${emby_name}"
+    fi
+    
+    # 移除6908端口映射
+    if grep -q '6908:6908' "/tmp/container_update_${emby_name}"; then
+        INFO "关闭 6908 端口映射"
+        sed -i '/-p 6908:6908/d' "/tmp/container_update_${emby_name}"
+    fi
+    
+    # 更新xiaoya.host配置
+    local docker0 xiaoya_host
+    docker0=$(get_docker0_ip)
+    xiaoya_host="127.0.0.1"  # 在only_for_emby网络中，使用127.0.0.1
+    
+    INFO "更改容器 host 配置"
+    sed -i "s/--add-host xiaoya.host.*/--add-host xiaoya.host:${xiaoya_host} \\\/" "/tmp/container_update_${emby_name}"
+    
+    # 停止和删除原容器
+    if ! docker stop "${emby_name}" > /dev/null 2>&1; then
+        if ! docker kill "${emby_name}" > /dev/null 2>&1; then
+            ERROR "停止 ${emby_name} 容器失败！"
+            return 1
+        fi
+    fi
+    INFO "停止 ${emby_name} 容器成功！"
+    
+    if ! docker rm --force "${emby_name}" > /dev/null 2>&1; then
+        ERROR "删除 ${emby_name} 容器失败！"
+        return 1
+    fi
+    
+    # 重新创建容器
+    if bash "/tmp/container_update_${emby_name}"; then
+        rm -f "/tmp/container_update_${emby_name}"
+        wait_emby_start "$emby_name"
+    else
+        ERROR "创建 ${emby_name} 容器失败！"
+        return 1
+    fi
+    
+    # 连接G-Box容器到新网络
+    local gbox_network_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "${gbox_name}")
+    if [[ "$gbox_network_mode" == "bridge" ]]; then
+        INFO "G-Box容器使用bridge网络模式，自动加入 only_for_emby 网络中..."
+        docker network connect only_for_emby "${gbox_name}"
+    elif [[ "$gbox_network_mode" == "host" ]]; then
+        INFO "G-Box容器使用host网络模式，无需额外网络配置"
+    else
+        INFO "G-Box容器使用 ${gbox_network_mode} 网络模式，尝试连接到 only_for_emby 网络..."
+        docker network connect only_for_emby "${gbox_name}" 2>/dev/null || WARN "无法将G-Box容器连接到 only_for_emby 网络"
+    fi
+    
+    # 更新emby_server.txt配置
+    INFO "配置 emby_server.txt 文件中"
+    echo "http://$ENBY_IP:6908" > "${config_dir}"/emby_server.txt
+    chown -R 0:0 "${config_dir}/emby_server.txt" 2>/dev/null || true
+    
+    # 重启G-Box容器
+    INFO "重启G-Box容器"
+    docker restart "${gbox_name}"
+    wait_gbox_start "$gbox_name"
+    
+    INFO "关闭 Emby 6908 端口完成！"
+    INFO "现在只能通过 2345 端口访问 Emby，6908 端口已被屏蔽！"
+}
+
 # 导出函数
 export -f INFO ERROR WARN \
     check_path check_port check_space check_root check_env check_loop_support check_qnap \
     setup_status command_exists \
     docker_pull update_ailg restore_containers restore_containers_simple \
-    xy_media_reunzip
+    xy_media_reunzip \
+    emby_close_6908_port get_docker0_ip wait_emby_start wait_gbox_start
