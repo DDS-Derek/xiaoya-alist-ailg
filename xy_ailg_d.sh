@@ -1222,6 +1222,7 @@ img_uninstall() {
 happy_emby() {
     # declare -ga img_order
     img_order=()
+    search_img="emby/embyserver|amilys/embyserver|nyanmisaka/jellyfin|jellyfin/jellyfin"
     check_qnap
     # check_loop_support
     get_emby_status > /dev/null
@@ -1249,7 +1250,12 @@ happy_emby() {
                         break
                     fi
                 done
-                printf "[ %-1d ] 容器名: \033[1;33m%-20s\033[0m 媒体库路径: \033[1;33m%s\033[0m\n" $((index + 1)) $name $media_path
+                # 分离媒体库和config镜像路径显示
+                if [ -n "$config_img_path" ]; then
+                    printf "[ %-1d ] 容器名: \033[1;33m%-20s\033[0m 媒体库路径: \033[1;33m%s\033[0m config镜像路径: \033[1;33m%s\033[0m\n" $((index + 1)) $name $media_path $config_img_path
+                else
+                    printf "[ %-1d ] 容器名: \033[1;33m%-20s\033[0m 媒体库路径: \033[1;33m%s\033[0m\n" $((index + 1)) $name $media_path
+                fi
             done
 
             while :; do
@@ -1747,8 +1753,9 @@ expand_diy_img_path() {
     emby_img="$(basename "${img_path}")"
     
     for op_emby in "${img_order[@]}"; do
-        docker stop "${op_emby}"
-        INFO "${op_emby}容器已关闭！"
+        container_name=${op_emby%%:*}
+        docker stop "${container_name}"
+        INFO "${container_name}容器已关闭！"
     done
     docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
     docker ps -a | grep 'ailg/xy-emd' | awk '{print $1}' | xargs -r docker stop

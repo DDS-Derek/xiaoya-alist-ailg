@@ -1562,25 +1562,42 @@ wait_gbox_start() {
     local container_name="$1"
     local TARGET_LOG_LINE_SUCCESS="load storages completed"
     local start_time=$(date +%s)
+    local timeout=600  # 10分钟超时
     
     INFO "等待G-Box容器 ${container_name} 启动..."
-    while true; do
-        local line=$(docker exec "$container_name" tail -n 10 /opt/alist/log/alist.log 2>&1)
+    
+    # 使用tail -f实时监控日志，避免遗漏
+    timeout $timeout docker exec "$container_name" tail -f /opt/alist/log/alist.log 2>&1 | while IFS= read -r line; do
         echo -e "$line"
-        local current_time=$(date +%s)
-        local elapsed_time=$((current_time - start_time))
         
         if [[ "$line" == *"$TARGET_LOG_LINE_SUCCESS"* ]]; then
             INFO "G-Box容器 ${container_name} 启动成功！"
-            return 0
+            # 发送信号给父进程表示成功
+            kill -USR1 $$ 2>/dev/null || true
+            break
         fi
         
-        if [ "$elapsed_time" -gt 600 ]; then
+        # 检查超时
+        local current_time=$(date +%s)
+        local elapsed_time=$((current_time - start_time))
+        if [ "$elapsed_time" -gt $timeout ]; then
             WARN "G-Box容器 ${container_name} 未正常启动超时 10 分钟！"
-            return 1
+            kill -USR2 $$ 2>/dev/null || true
+            break
         fi
-        sleep 8
     done
+    
+    # 检查退出状态
+    local exit_code=$?
+    if [ $exit_code -eq 124 ]; then
+        WARN "G-Box容器 ${container_name} 未正常启动超时 10 分钟！"
+        return 1
+    elif [ $exit_code -eq 0 ]; then
+        return 0
+    else
+        WARN "G-Box容器 ${container_name} 启动过程中出现错误！"
+        return 1
+    fi
 }
 
 # Emby 6908端口屏蔽功能

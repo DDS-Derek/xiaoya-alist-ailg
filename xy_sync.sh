@@ -400,32 +400,38 @@ function xy_emby_sync() {
     fi
 
     # --- 容器类型选择交互 ---
-    echo -e "\n\033[1;36m=== 容器类型配置 ===\033[0m"
-    echo -e "请选择您的媒体服务器类型："
-    echo -e "\033[32m1. Emby\033[0m"
-    echo -e "\033[33m2. Jellyfin\033[0m"
-    
-    local mode_choice=""
-    while true; do
-        read -p "请输入选择 [1-1，默认1]: " mode_choice
-        mode_choice=${mode_choice:-1}
+    # 检查是否已经预设了container_mode
+    if [[ -n "${container_mode}" ]]; then
+        echo -e "\n\033[1;36m=== 容器类型配置 ===\033[0m"
+        echo -e "\033[32m使用预设模式: ${container_mode}\033[0m"
+    else
+        echo -e "\n\033[1;36m=== 容器类型配置 ===\033[0m"
+        echo -e "请选择您的媒体服务器类型："
+        echo -e "\033[32m1. Emby\033[0m"
+        echo -e "\033[33m2. Jellyfin\033[0m"
         
-        case "$mode_choice" in
-            1)
-                container_mode="emby"
-                echo -e "\033[32m已选择: Emby模式\033[0m"
-                break
-                ;;
-            2)
-                container_mode="jellyfin" 
-                echo -e "\033[33m已选择: Jellyfin模式\033[0m"
-                break
-                ;;
-            *)
-                echo -e "\033[31m错误: 请输入1或2\033[0m"
-                ;;
-        esac
-    done
+        local mode_choice=""
+        while true; do
+            read -p "请输入选择 [1-1，默认1]: " mode_choice
+            mode_choice=${mode_choice:-1}
+            
+            case "$mode_choice" in
+                1)
+                    container_mode="emby"
+                    echo -e "\033[32m已选择: Emby模式\033[0m"
+                    break
+                    ;;
+                2)
+                    container_mode="jellyfin" 
+                    echo -e "\033[33m已选择: Jellyfin模式\033[0m"
+                    break
+                    ;;
+                *)
+                    echo -e "\033[31m错误: 请输入1或2\033[0m"
+                    ;;
+            esac
+        done
+    fi
 
     # --- Construct Final Directory String ---
     selected_dirs_array=()
