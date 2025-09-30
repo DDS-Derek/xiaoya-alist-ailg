@@ -35,7 +35,7 @@ get_loop_device() {
         return 1
     fi
     
-    existing_loop=$(losetup -a | grep " $offset " | grep " /$img_file$" | head -n1)
+    existing_loop=$(losetup -a | grep " $offset" | grep "/$img_file" | head -n1)
     
     if [ -n "$existing_loop" ]; then
         found_device=$(echo "$existing_loop" | cut -d: -f1)
@@ -118,6 +118,9 @@ mount_img() {
     INFO "媒体库img镜像挂载成功！"
     
     ln -sf /volume_img/xiaoya /media
+    if [ -L "/volume_img/xiaoya/xiaoya" ]; then
+        rm -f "/volume_img/xiaoya/xiaoya"
+    fi
     INFO "/media 创建软链接成功！"
 }
 

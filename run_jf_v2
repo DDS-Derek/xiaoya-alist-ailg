@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 # shellcheck shell=sh
 # shellcheck disable=SC2114
+
 get_loop_device() {
     local img_file="$1"
     local offset="${2:-10000000}"
@@ -17,7 +18,7 @@ get_loop_device() {
         return 1
     fi
     
-    existing_loop=$(losetup -a | grep " $offset " | grep " /$img_file$" | head -n1)
+    existing_loop=$(losetup -a | grep " $offset" | grep "/$img_file" | head -n1)
     
     if [ -n "$existing_loop" ]; then
         loop_device=$(echo "$existing_loop" | cut -d: -f1)
@@ -96,6 +97,9 @@ if [ -f /media_jf.img ]; then
         fi
     fi
     ! ls /media && ln -sf /volume_img/xiaoya /media
+    if [ -L "/volume_img/xiaoya/xiaoya" ]; then
+        rm -f "/volume_img/xiaoya/xiaoya"
+    fi
 fi
 
 if [ -d /cache ]; then
