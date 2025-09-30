@@ -844,7 +844,8 @@ function user_emby_fast() {
     #get_emby_image
     if [ ! -f "$image_dir/${init}" ]; then
         rm -rf "$image_dir/${init}"
-        docker cp "${docker_name}":/var/lib/${init} "$image_dir/"
+        curl -o "$image_dir/${init}" https://ailg.ggbond.org/${init}_v2
+        # docker cp "${docker_name}":/var/lib/${init} "$image_dir/"
         chmod 777 "$image_dir/${init}"
     fi
     #if ${del_emby}; then
