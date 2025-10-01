@@ -1544,7 +1544,7 @@ wait_emby_start() {
         local current_time=$(date +%s)
         local elapsed_time=$((current_time - start_time))
         
-        if [[ "$line" == *"$TARGET_LOG_LINE_SUCCESS"* ]] && [ "$elapsed_time" -gt 60 ]; then
+        if [[ "$line" == *"$TARGET_LOG_LINE_SUCCESS"* ]] && [ "$elapsed_time" -gt 10 ]; then
             INFO "Emby容器 ${container_name} 启动成功！"
             return 0
         fi
