@@ -99,7 +99,7 @@ check_env() {
     fi
 
     if ! grep -q 'alias gbox' /etc/profile; then
-        echo -e "alias gbox='bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install_d.sh)\"'" >> /etc/profile
+        echo -e "alias gbox='bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)\"'" >> /etc/profile
     fi
     source /etc/profile
 
@@ -1876,8 +1876,22 @@ cleanup_invalid_loops() {
 # 获取或创建.loop状态文件中的loop设备号
 get_loop_from_state_file() {
     local img_file="$1"
+    # 统一使用media镜像的父级目录作为.loop文件位置
+    # 如果当前是config镜像，需要找到对应的media镜像目录
     local img_dir=$(dirname "$img_file")
-    local state_file="$img_dir/.loop"
+    local img_name=$(basename "$img_file")
+    local state_file=""
+    
+    # 根据img文件名确定类型
+    if [[ "$img_name" =~ ^emby-ailg.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-ailg.*\.img$ ]]; then
+        # 媒体库镜像，直接使用当前目录
+        state_file="$img_dir/.loop"
+    elif [[ "$img_name" =~ ^emby-config.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-config.*\.img$ ]]; then
+        # 配置镜像，使用当前目录
+        state_file="$img_dir/.loop"
+    else
+        return 1
+    fi
     
     if [ -f "$state_file" ]; then
         # 根据img文件名确定类型
@@ -1907,8 +1921,22 @@ get_loop_from_state_file() {
 update_loop_state_file() {
     local img_file="$1"
     local loop_device="$2"
+    # 统一使用media镜像的父级目录作为.loop文件位置
     local img_dir=$(dirname "$img_file")
-    local state_file="$img_dir/.loop"
+    local img_name=$(basename "$img_file")
+    local state_file=""
+    
+    # 根据img文件名确定类型
+    if [[ "$img_name" =~ ^emby-ailg.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-ailg.*\.img$ ]]; then
+        # 媒体库镜像，直接使用当前目录
+        state_file="$img_dir/.loop"
+    elif [[ "$img_name" =~ ^emby-config.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-config.*\.img$ ]]; then
+        # 配置镜像，使用当前目录
+        state_file="$img_dir/.loop"
+    else
+        ERROR "不支持的镜像文件类型: $img_name"
+        return 1
+    fi
     
     # 确保目录存在
     mkdir -p "$img_dir"

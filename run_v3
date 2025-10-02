@@ -2,6 +2,73 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2114
 
+# 检测并同步.loop文件到/ailg_config
+sync_loop_files() {
+    # 检查是否存在/ailg_config目录
+    if [ -d "/ailg_config" ]; then
+        # 检查/ailg_config中是否有emby-config开头的img文件
+        if ls /ailg_config/emby-config*.img >/dev/null 2>&1 || ls /ailg_config/jellyfin-config*.img >/dev/null 2>&1; then
+            INFO "检测到/ailg_config目录中有config镜像文件，开始同步.loop文件" >&2
+            
+            # 如果/ailg/.loop存在，将其复制到/ailg_config/.loop
+            if [ -f "/ailg/.loop" ]; then
+                cp -f "/ailg/.loop" "/ailg_config/.loop"
+                INFO "已将/ailg/.loop同步到/ailg_config/.loop" >&2
+            else
+                INFO "/ailg/.loop不存在，无需同步" >&2
+            fi
+        else
+            INFO "/ailg_config目录存在但无config镜像文件，跳过同步" >&2
+        fi
+    else
+        INFO "未检测到/ailg_config目录，使用标准.loop文件管理" >&2
+    fi
+}
+
+# 在脚本开始时同步.loop文件
+sync_loop_files
+
+# 更新.loop文件到所有相关位置
+update_loop_files() {
+    local img_type="$1"
+    local loop_device="$2"
+    local img_path="$3"
+    
+    # 更新/ailg/.loop
+    local temp_file=$(mktemp)
+    local updated=false
+    
+    if [ -f "/ailg/.loop" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^$img_type\  ]]; then
+                # 更新现有行，保持原有的完整路径格式
+                local original_path=$(echo "$line" | awk '{print $3}')
+                echo "$img_type $loop_device $original_path" >> "$temp_file"
+                updated=true
+            else
+                # 保留其他行
+                echo "$line" >> "$temp_file"
+            fi
+        done < "/ailg/.loop"
+    fi
+    
+    # 如果没有找到对应类型的行，添加新行
+    if [ "$updated" = false ]; then
+        echo "$img_type $loop_device $img_path" >> "$temp_file"
+    fi
+    
+    # 替换原文件
+    mv "$temp_file" "/ailg/.loop"
+    
+    # 如果存在/ailg_config目录，也更新/ailg_config/.loop
+    if [ -d "/ailg_config" ]; then
+        cp -f "/ailg/.loop" "/ailg_config/.loop"
+        INFO "已同步.loop文件到/ailg_config/.loop" >&2
+    fi
+    
+    INFO "已更新.loop文件: $img_type -> $loop_device" >&2
+}
+
 # loop设备管理函数
 get_loop_device() {
     local img_file="$1"
@@ -15,19 +82,24 @@ get_loop_device() {
         state_file_dir="/ailg"
     elif [ "$img_file" = "config.img" ]; then
         mount_dir="/volume_cfg"
-        state_file_dir="/ailg"
+        # config镜像优先从/ailg_config/.loop读取，如果不存在则从/ailg/.loop读取
+        if [ -f "/ailg_config/.loop" ]; then
+            state_file_dir="/ailg_config"
+        else
+            state_file_dir="/ailg"
+        fi
     else
         return 1
     fi
     
-    # 检查/ailg/.loop文件是否存在
+    # 检查状态文件是否存在
     local loop_device=""
-    if [ -f "/ailg/.loop" ]; then
+    if [ -f "$state_file_dir/.loop" ]; then
         # 根据img文件类型从.loop文件解析出对应的loop设备号
         if [ "$img_file" = "media.img" ]; then
-            loop_device=$(grep "^media " "/ailg/.loop" | awk '{print $2}')
+            loop_device=$(grep "^media " "$state_file_dir/.loop" | awk '{print $2}')
         elif [ "$img_file" = "config.img" ]; then
-            loop_device=$(grep "^config " "/ailg/.loop" | awk '{print $2}')
+            loop_device=$(grep "^config " "$state_file_dir/.loop" | awk '{print $2}')
         fi
         
         
@@ -57,11 +129,18 @@ get_loop_device() {
                     INFO "loop设备号一致，视为已经绑定" >&2
                     # 直接尝试挂载
                     if mount "$loop_device" "$mount_dir" 2>/dev/null; then
-                        # 检查/proc/self/mountinfo中的路径是否与.loop一致
-                        local recorded_path=$(head -n1 "/ailg/.loop" | awk '{print $2}')
-                        local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
-                        
-                        if [ "$recorded_path" = "$current_path" ]; then
+                    # 检查/proc/self/mountinfo中的路径是否与.loop一致
+                    local recorded_path=$(grep "^$img_type " "/ailg/.loop" | awk '{print $3}')
+                    local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
+                    
+                    # 路径比较：检查两个路径是否指向同一个文件
+                    # 使用包含逻辑：如果recorded_path包含current_filename，或者current_path包含recorded_filename
+                    local recorded_filename=$(basename "$recorded_path")
+                    local current_filename=$(basename "$current_path")
+                    
+                    if [ "$recorded_filename" = "$current_filename" ] || 
+                       [[ "$recorded_path" == *"$current_filename" ]] || 
+                       [[ "$current_path" == *"$recorded_filename" ]]; then
                             INFO "挂载路径一致，操作成功" >&2
                             return 0
                         else
@@ -94,30 +173,8 @@ get_loop_device() {
                         img_type="config"
                     fi
                     
-                    # 更新对应类型的行
-                    local temp_file=$(mktemp)
-                    local updated=false
-                    
-                    if [ -f "/ailg/.loop" ]; then
-                        while IFS= read -r line; do
-                            if [[ "$line" =~ ^$img_type\  ]]; then
-                                # 更新现有行
-                                echo "$img_type $loop_device $current_path" >> "$temp_file"
-                                updated=true
-                            else
-                                # 保留其他行
-                                echo "$line" >> "$temp_file"
-                            fi
-                        done < "/ailg/.loop"
-                    fi
-                    
-                    # 如果没有找到对应类型的行，添加新行
-                    if [ "$updated" = false ]; then
-                        echo "$img_type $loop_device $current_path" >> "$temp_file"
-                    fi
-                    
-                    # 替换原文件
-                    mv "$temp_file" "/ailg/.loop"
+                    # 使用新的更新函数
+                    update_loop_files "$img_type" "$loop_device" "$current_path"
                     INFO "成功绑定并挂载: $loop_device -> /$img_file" >&2
                     return 0
                 else
@@ -160,30 +217,8 @@ get_loop_device() {
                 img_type="config"
             fi
             
-            # 更新对应类型的行
-            local temp_file=$(mktemp)
-            local updated=false
-            
-            if [ -f "/ailg/.loop" ]; then
-                while IFS= read -r line; do
-                    if [[ "$line" =~ ^$img_type\  ]]; then
-                        # 更新现有行
-                        echo "$img_type $new_loop $current_path" >> "$temp_file"
-                        updated=true
-                    else
-                        # 保留其他行
-                        echo "$line" >> "$temp_file"
-                    fi
-                done < "/ailg/.loop"
-            fi
-            
-            # 如果没有找到对应类型的行，添加新行
-            if [ "$updated" = false ]; then
-                echo "$img_type $new_loop $current_path" >> "$temp_file"
-            fi
-            
-            # 替换原文件
-            mv "$temp_file" "/ailg/.loop"
+            # 使用新的更新函数
+            update_loop_files "$img_type" "$new_loop" "$current_path"
             INFO "成功绑定并挂载新设备: $new_loop -> /$img_file" >&2
             return 0
         else

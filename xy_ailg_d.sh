@@ -2,8 +2,8 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2086
 
-source /tmp/xy_utils_d.sh
-source /tmp/xy_sync_d.sh
+source /tmp/xy_utils.sh
+source /tmp/xy_sync.sh
 
 PATH=${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
@@ -827,6 +827,7 @@ function user_emby_fast() {
 
     # 处理配置文件镜像
     mount | grep $config_mount_dir && umount $config_mount_dir
+    
     if [ -n "$local_config_size" ] && [ -n "$remote_config_size" ] && [ "$local_config_size" -eq "$remote_config_size" ]; then
         if [ -f "$image_dir_config/$emby_img_config" ]; then
             INFO "开始处理配置文件镜像..."
@@ -840,12 +841,13 @@ function user_emby_fast() {
             WARN "配置文件镜像不存在，跳过处理"
         fi
     else
+        INFO "条件不匹配：local_config_size($local_config_size) != remote_config_size($remote_config_size) 或其中一个为空"
         INFO "本地已有配置文件镜像，无需重新处理！"
     fi
 
-    if [ ! -f /usr/bin/smart_mount_img ]; then
-        docker cp "${docker_name}":/var/lib/smart_mount_img "/usr/bin/smart_mount_img"
-        chmod 777 /usr/bin/smart_mount_img
+    if [ ! -f /usr/bin/mount_ailg ]; then
+        docker cp "${docker_name}":/var/lib/mount_ailg "/usr/bin/mount_ailg"
+        chmod 777 /usr/bin/mount_ailg
     fi
 
     INFO "开始安装小雅emby/jellyfin……"
@@ -868,9 +870,16 @@ function user_emby_fast() {
         fi
 
         if [[ "${emby_image}" =~ emby ]]; then
+            # 构建ailg挂载参数
+            ailg_mount_params="-v $image_dir:/ailg"
+            if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
+                ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
+            fi
+            
             docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
                 -v $image_dir/$emby_img:/media.img \
                 $config_mount_params \
+                $ailg_mount_params \
                 -v "$image_dir/run":/etc/cont-init.d/run \
                 --user 0:0 \
                 -e UID=0 -e GID=0 -e GIDLIST=0 \
@@ -879,9 +888,16 @@ function user_emby_fast() {
             echo "http://127.0.0.1:6908" > $config_dir/emby_server.txt
             fuck_cors "$emby_name"
         elif [[ "${emby_image}" =~ jellyfin/jellyfin ]]; then
+            # 构建ailg挂载参数
+            ailg_mount_params="-v $image_dir:/ailg"
+            if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
+                ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
+            fi
+            
             docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
                 -v $image_dir/$emby_img:/media.img \
                 $config_mount_params \
+                $ailg_mount_params \
                 -v "$image_dir/run_jf":/etc/run_jf \
                 --entrypoint "/etc/run_jf" \
                 --user 0:0 \
@@ -895,9 +911,16 @@ function user_emby_fast() {
                 --privileged --add-host="xiaoya.host:127.0.0.1" --restart always $emby_image   
             echo "http://127.0.0.1:6910" > $config_dir/jellyfin_server.txt   
         else
+            # 构建ailg挂载参数
+            ailg_mount_params="-v $image_dir:/ailg"
+            if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
+                ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
+            fi
+            
             docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
                 -v $image_dir/$emby_img:/media.img \
                 $config_mount_params \
+                $ailg_mount_params \
                 -v "$image_dir/run_jf":/etc/run_jf \
                 --entrypoint "/etc/run_jf" \
                 --user 0:0 \
@@ -1131,14 +1154,10 @@ img_uninstall() {
                     media_loop=""
                     config_loop=""
                     
-                    # 尝试从容器内的.loop文件获取媒体库loop设备号
-                    if docker exec ${emby_name} test -f /volume_img/xiaoya/.loop 2>/dev/null; then
-                        media_loop=$(docker exec ${emby_name} cat /volume_img/xiaoya/.loop 2>/dev/null | cut -d' ' -f1)
-                    fi
-                    
-                    # 尝试从容器内的.loop文件获取配置loop设备号
-                    if docker exec ${emby_name} test -f /volume_cfg/config/.loop 2>/dev/null; then
-                        config_loop=$(docker exec ${emby_name} cat /volume_cfg/config/.loop 2>/dev/null | cut -d' ' -f1)
+                    # 从/ailg/.loop获取媒体库和配置的loop设备号
+                    if docker exec ${emby_name} test -f /ailg/.loop 2>/dev/null; then
+                        media_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
+                        config_loop=$(docker exec ${emby_name} grep "^config " /ailg/.loop 2>/dev/null | awk '{print $2}')
                     fi
 
                     # 停止所有相关容器
@@ -1322,9 +1341,18 @@ happy_emby() {
                         config_mount_params="-v $happy_config_path:/config.img"
                     fi
                     
+                    # 构建ailg挂载参数
+                    happy_img_dir=$(dirname "$happy_path")
+                    happy_config_dir=$(dirname "$happy_config_path")
+                    ailg_mount_params="-v $happy_img_dir:/ailg"
+                    if [ -n "$happy_config_path" ] && [ "$happy_config_dir" != "$happy_img_dir" ]; then
+                        ailg_mount_params="$ailg_mount_params -v $happy_config_dir:/ailg_config"
+                    fi
+                    
                     docker run -d --name "${happy_name}" -v /etc/nsswitch.conf:/etc/nsswitch.conf \
                         -v "${happy_path}":/media.img \
                         $config_mount_params \
+                        $ailg_mount_params \
                         -v "${happy_path%/*.img}/run":/etc/cont-init.d/run \
                         --device /dev/dri:/dev/dri \
                         --user 0:0 \
@@ -1501,9 +1529,9 @@ mount_img() {
     # check_loop_support
     get_emby_status > /dev/null
     # update_ailg ailg/ggbond:latest
-    if [ ! -f /usr/bin/smart_mount_img ]; then
-        docker cp g-box:/var/lib/smart_mount_img "/usr/bin/smart_mount_img"
-        chmod 777 /usr/bin/smart_mount_img
+    if [ ! -f /usr/bin/mount_ailg ]; then
+        docker cp g-box:/var/lib/mount_ailg "/usr/bin/mount_ailg"
+        chmod 777 /usr/bin/mount_ailg
     fi
     if [ ${#emby_list[@]} -ne 0 ]; then
         for entry in "${emby_list[@]}"; do
@@ -1582,15 +1610,12 @@ mount_img() {
                     # done
                     # 从容器内获取loop设备号（容器停止前）
                     img_loop=""
-                    if [[ "$mount_type" == "media" ]]; then
-                        # 媒体库模式，从 /volume_img/xiaoya/.loop 获取
-                        if docker exec ${emby_name} test -f /volume_img/xiaoya/.loop 2>/dev/null; then
-                            img_loop=$(docker exec ${emby_name} cat /volume_img/xiaoya/.loop 2>/dev/null | cut -d' ' -f1)
-                        fi
-                    else
-                        # 配置模式，从 /volume_cfg/config/.loop 获取
-                        if docker exec ${emby_name} test -f /volume_cfg/config/.loop 2>/dev/null; then
-                            img_loop=$(docker exec ${emby_name} cat /volume_cfg/config/.loop 2>/dev/null | cut -d' ' -f1)
+                    # 从/ailg/.loop获取对应类型的loop设备
+                    if docker exec ${emby_name} test -f /ailg/.loop 2>/dev/null; then
+                        if [[ "$mount_type" == "media" ]]; then
+                            img_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
+                        else
+                            img_loop=$(docker exec ${emby_name} grep "^config " /ailg/.loop 2>/dev/null | awk '{print $2}')
                         fi
                     fi
 
@@ -1662,6 +1687,7 @@ mount_img() {
 
             get_img_path "$mount_type"
             
+            
             if smart_mount_img "${img_path}" "${img_mount}"; then
                 INFO "已将${img_path}挂载到${img_mount}目录！"
             else
@@ -1692,9 +1718,9 @@ expand_img() {
     # check_loop_support
     get_emby_status > /dev/null
     # update_ailg ailg/ggbond:latest
-    if [ ! -f /usr/bin/smart_mount_img ]; then
-        docker cp g-box:/var/lib/smart_mount_img "/usr/bin/smart_mount_img"
-        chmod 777 /usr/bin/smart_mount_img
+    if [ ! -f /usr/bin/mount_ailg ]; then
+        docker cp g-box:/var/lib/mount_ailg "/usr/bin/mount_ailg"
+        chmod 777 /usr/bin/mount_ailg
     fi
     
     # 先询问用户要扩容的镜像类型
@@ -2337,10 +2363,14 @@ create_legacy_emby_container() {
     fi
     
     # 创建旧版Emby容器（使用新版动态loop设备获取）
+    # 构建ailg挂载参数
+    ailg_mount_params="-v $legacy_img_dir:/ailg"
+    
     if [[ "$emby_image" == *"jellyfin"* ]]; then
         # Jellyfin容器
         docker run -d --name "$legacy_container_name" -v /etc/nsswitch.conf:/etc/nsswitch.conf \
             -v "$legacy_img_path":/media.img \
+            $ailg_mount_params \
             -v "$legacy_img_dir/run_jf":/etc/run_jf \
             --entrypoint "/etc/run_jf" \
             --user 0:0 \
@@ -2356,6 +2386,7 @@ create_legacy_emby_container() {
         # Emby容器
         docker run -d --name "$legacy_container_name" -v /etc/nsswitch.conf:/etc/nsswitch.conf \
             -v "$legacy_img_path":/media.img \
+            $ailg_mount_params \
             -v "$legacy_img_dir/run":/etc/cont-init.d/run \
             --user 0:0 \
             -e UID=0 -e GID=0 -e GIDLIST=0 \

@@ -1129,14 +1129,10 @@ img_uninstall() {
                     media_loop=""
                     config_loop=""
                     
-                    # 尝试从容器内的.loop文件获取媒体库loop设备号
-                    if docker exec ${emby_name} test -f /volume_img/xiaoya/.loop 2>/dev/null; then
-                        media_loop=$(docker exec ${emby_name} cat /volume_img/xiaoya/.loop 2>/dev/null | cut -d' ' -f1)
-                    fi
-                    
-                    # 尝试从容器内的.loop文件获取配置loop设备号
-                    if docker exec ${emby_name} test -f /volume_cfg/config/.loop 2>/dev/null; then
-                        config_loop=$(docker exec ${emby_name} cat /volume_cfg/config/.loop 2>/dev/null | cut -d' ' -f1)
+                    # 从/ailg/.loop获取媒体库和配置的loop设备号
+                    if docker exec ${emby_name} test -f /ailg/.loop 2>/dev/null; then
+                        media_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
+                        config_loop=$(docker exec ${emby_name} grep "^config " /ailg/.loop 2>/dev/null | awk '{print $2}')
                     fi
 
                     # 停止所有相关容器
@@ -1546,15 +1542,12 @@ mount_img() {
                     # done
                     # 从容器内获取loop设备号（容器停止前）
                     img_loop=""
-                    if [[ "$mount_type" == "media" ]]; then
-                        # 媒体库模式，从 /volume_img/xiaoya/.loop 获取
-                        if docker exec ${emby_name} test -f /volume_img/xiaoya/.loop 2>/dev/null; then
-                            img_loop=$(docker exec ${emby_name} cat /volume_img/xiaoya/.loop 2>/dev/null | cut -d' ' -f1)
-                        fi
-                    else
-                        # 配置模式，从 /volume_cfg/config/.loop 获取
-                        if docker exec ${emby_name} test -f /volume_cfg/config/.loop 2>/dev/null; then
-                            img_loop=$(docker exec ${emby_name} cat /volume_cfg/config/.loop 2>/dev/null | cut -d' ' -f1)
+                    # 从/ailg/.loop获取对应类型的loop设备
+                    if docker exec ${emby_name} test -f /ailg/.loop 2>/dev/null; then
+                        if [[ "$mount_type" == "media" ]]; then
+                            img_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
+                        else
+                            img_loop=$(docker exec ${emby_name} grep "^config " /ailg/.loop 2>/dev/null | awk '{print $2}')
                         fi
                     fi
 
@@ -1587,7 +1580,7 @@ mount_img() {
                         fi
                     fi
 
-                    img_loop=$(docker exec ${emby_name} cat /volume_img/xiaoya/.loop 2>/dev/null | cut -d' ' -f1)
+                    img_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
                     
                     if [ -n "$img_loop" ] && mount "$img_loop" ${img_mount}; then
                         INFO "已将${Yellow}${img_path}${NC}挂载到${Yellow}${img_mount}${NC}目录！" && WARN "如您想操作小雅config数据的同步或更新，请先手动关闭${Yellow}${emby_name}${NC}容器！"
