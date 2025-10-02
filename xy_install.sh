@@ -126,16 +126,8 @@ download_file() {
 
         if eval "$download_cmd"; then
             if [ -s "/tmp/${file}" ]; then
-                sed -i 's/\r$//' "/tmp/${file}"
-                sed -i 's/^[[:space:]]*//' "/tmp/${file}"
-                sed -i 's/[[:space:]]*$//' "/tmp/${file}"
-                
-                # 检查shebang行是否正确
-                if ! head -1 "/tmp/${file}" | grep -q "^#!/bin/bash$"; then
-                    echo "警告: ${file} 的shebang行格式不正确，尝试修复..."
-                    # 修复shebang行
-                    sed -i '1s/^[[:space:]]*#!/#!/' "/tmp/${file}"
-                fi
+                # 移除UTF-8 BOM
+                sed -i '1s/^\xEF\xBB\xBF//' "/tmp/${file}"
                 case "$file" in
                     "xy_ailg.sh")
                         if grep -q "fuck_docker" "/tmp/${file}"; then
@@ -180,15 +172,6 @@ done
 
 if [ $download_success -eq 1 ] && [ $utils_success -eq 1 ] && [ $sync_success -eq 1 ]; then
     # 添加执行权限
-
-    for file in "xy_ailg.sh" "xy_utils.sh" "xy_sync.sh"; do
-        if [ -f "/tmp/${file}" ]; then
-            # 移除Windows换行符，移除首尾空格
-            sed -i 's/\r$//' "/tmp/${file}"
-            sed -i 's/^[[:space:]]*//' "/tmp/${file}"
-            sed -i 's/[[:space:]]*$//' "/tmp/${file}"
-        fi
-    done
     
     chmod +x /tmp/xy_ailg.sh
     chmod +x /tmp/xy_utils.sh
