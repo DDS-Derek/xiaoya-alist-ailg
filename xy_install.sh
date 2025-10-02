@@ -170,6 +170,16 @@ done
 
 if [ $download_success -eq 1 ] && [ $utils_success -eq 1 ] && [ $sync_success -eq 1 ]; then
     # 添加执行权限
+
+    for file in "xy_ailg.sh" "xy_utils.sh" "xy_sync.sh"; do
+        if [ -f "/tmp/${file}" ]; then
+            # 移除Windows换行符，移除首尾空格
+            sed -i 's/\r$//' "/tmp/${file}"
+            sed -i 's/^[[:space:]]*//' "/tmp/${file}"
+            sed -i 's/[[:space:]]*$//' "/tmp/${file}"
+        fi
+    done
+    
     chmod +x /tmp/xy_ailg.sh
     chmod +x /tmp/xy_utils.sh
     chmod +x /tmp/xy_sync.sh
