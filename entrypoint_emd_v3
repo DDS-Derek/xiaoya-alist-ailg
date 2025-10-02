@@ -191,13 +191,48 @@ get_loop_device() {
                     losetup -d "$existing_loop" 2>/dev/null
                 fi
             elif [ -n "$loop_device_binding" ]; then
-                INFO "loop设备 $loop_device 已被绑定到其他文件，先解除绑定" >&2
-                umount -l "$loop_device" 2>/dev/null
-                losetup -d "$loop_device" 2>/dev/null
-                if ! losetup -a | grep -q "^$loop_device:"; then
-                    INFO "成功解除loop设备绑定: $loop_device" >&2
+                # 指定的loop_device已经被绑定到其他文件，先尝试直接挂载检查是否为同一镜像
+                INFO "loop设备 $loop_device 已被绑定到其他文件，尝试直接挂载检查" >&2
+                if mount "$loop_device" "$mount_dir" 2>/dev/null; then
+                    # 检查/proc/self/mountinfo中的路径是否与.loop一致
+                    local recorded_path=$(grep "^media " "$state_file_dir/.loop" | awk '{print $3}')
+                    local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
+                    
+                    # 处理current_path：如果以@开头，去掉第一节路径
+                    if [[ "$current_path" =~ ^/@ ]]; then
+                        current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+                    fi
+                    
+                    # 路径比较：检查两个路径是否指向同一个文件
+                    local recorded_filename=$(basename "$recorded_path")
+                    local current_filename=$(basename "$current_path")
+                    
+                    if [ "$recorded_filename" = "$current_filename" ] || 
+                       [[ "$recorded_path" == *"$current_filename" ]] || 
+                       [[ "$current_path" == *"$recorded_filename" ]]; then
+                        INFO "挂载路径一致，操作成功" >&2
+                        return 0
+                    else
+                        INFO "挂载路径不一致，需要重新绑定" >&2
+                        umount -l "$loop_device" 2>/dev/null
+                        losetup -d "$loop_device" 2>/dev/null
+                        # 验证losetup -d是否成功
+                        if ! losetup -a | grep -q "^$loop_device:"; then
+                            INFO "成功解除loop设备绑定: $loop_device" >&2
+                        else
+                            WARN "losetup -d可能未完全成功，但继续尝试重新绑定" >&2
+                        fi
+                    fi
                 else
-                    WARN "losetup -d可能未完全成功，但继续尝试重新绑定" >&2
+                    INFO "挂载失败，需要解除绑定后重新绑定" >&2
+                    umount -l "$loop_device" 2>/dev/null
+                    losetup -d "$loop_device" 2>/dev/null
+                    # 验证losetup -d是否成功
+                    if ! losetup -a | grep -q "^$loop_device:"; then
+                        INFO "成功解除loop设备绑定: $loop_device" >&2
+                    else
+                        WARN "losetup -d可能未完全成功，但继续尝试重新绑定" >&2
+                    fi
                 fi
             else
                 INFO "容器中无/$img_file相关的loop绑定，使用.loop中的设备号" >&2
