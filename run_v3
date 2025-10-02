@@ -149,6 +149,11 @@ get_loop_device() {
                     local recorded_path=$(grep "^$img_type " "/ailg/.loop" | awk '{print $3}')
                     local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
                     
+                    # 处理current_path：如果以@开头，去掉第一节路径
+                    if [[ "$current_path" =~ ^/@ ]]; then
+                        current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+                    fi
+                    
                     # 路径比较：检查两个路径是否指向同一个文件
                     # 使用包含逻辑：如果recorded_path包含current_filename，或者current_path包含recorded_filename
                     local recorded_filename=$(basename "$recorded_path")
@@ -193,6 +198,12 @@ get_loop_device() {
                 if mount "$loop_device" "$mount_dir"; then
                     # 更新.loop文件中的路径信息
                     local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
+                    
+                    # 处理current_path：如果以@开头，去掉第一节路径
+                    if [[ "$current_path" =~ ^/@ ]]; then
+                        current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+                    fi
+                    
                     local img_type=""
                     if [ "$img_file" = "media.img" ]; then
                         img_type="media"
@@ -236,6 +247,11 @@ get_loop_device() {
             # 挂载成功，记录路径信息到/ailg/.loop
             mkdir -p "/ailg"
             current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
+            
+            # 处理current_path：如果以@开头，去掉第一节路径
+            if [[ "$current_path" =~ ^/@ ]]; then
+                current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+            fi
             
             local img_type=""
             if [ "$img_file" = "media.img" ]; then

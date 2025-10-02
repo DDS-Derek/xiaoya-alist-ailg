@@ -164,6 +164,11 @@ get_loop_device() {
                         local recorded_path=$(grep "^media " "$state_file_dir/.loop" | awk '{print $3}')
                         local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
                         
+                        # 处理current_path：如果以@开头，去掉第一节路径
+                        if [[ "$current_path" =~ ^/@ ]]; then
+                            current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+                        fi
+                        
                         local recorded_filename=$(basename "$recorded_path")
                         local current_filename=$(basename "$current_path")
                         
@@ -201,6 +206,12 @@ get_loop_device() {
             if losetup -o "$offset" "$loop_device" "/$img_file"; then
                 if mount "$loop_device" "$mount_dir"; then
                     local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
+                    
+                    # 处理current_path：如果以@开头，去掉第一节路径
+                    if [[ "$current_path" =~ ^/@ ]]; then
+                        current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+                    fi
+                    
                     local img_type="media"
                     
                     update_loop_files "$img_type" "$loop_device" "$current_path"
@@ -233,6 +244,11 @@ get_loop_device() {
         if mount "$new_loop" "$mount_dir"; then
             mkdir -p "/ailg"
             current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
+            
+            # 处理current_path：如果以@开头，去掉第一节路径
+            if [[ "$current_path" =~ ^/@ ]]; then
+                current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+            fi
             
             local img_type="media"
             
