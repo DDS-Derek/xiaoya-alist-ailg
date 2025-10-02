@@ -1537,15 +1537,15 @@ mount_img() {
                         fi
                     fi
 
-                    docker stop ${emby_name}
-                    stop_related_containers "${img_path}"
+                    # docker stop ${emby_name}
+                    # stop_related_containers "${img_path}"
 
                     cleanup_invalid_loops
                     
-                    if [ -n "$img_loop" ]; then
-                        umount -l "$img_loop" > /dev/null 2>&1
-                        losetup -d "$img_loop" > /dev/null 2>&1
-                    fi
+                    # if [ -n "$img_loop" ]; then
+                    #     umount -l "$img_loop" > /dev/null 2>&1
+                    #     losetup -d "$img_loop" > /dev/null 2>&1
+                    # fi
                     host_img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
                     if [ -n "$host_img_loop" ]; then
                         umount -l "$host_img_loop" > /dev/null 2>&1
@@ -1553,8 +1553,8 @@ mount_img() {
                     fi
                     mount | grep -qF "${img_mount}" && umount "${img_mount}"
 
-                    docker start ${emby_name}
-                    sleep 5
+                    # docker start ${emby_name}
+                    # sleep 5
 
                     if ! docker ps --format '{{.Names}}' | grep -q "^${emby_name}$"; then
                         if smart_mount_img "${img_path}" "${img_mount}"; then
@@ -1566,11 +1566,11 @@ mount_img() {
                         fi
                     fi
 
-                    if [[ "$mount_type" == "media" ]]; then
-                        img_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
-                    else
-                        img_loop=$(docker exec ${emby_name} grep "^config " /ailg/.loop 2>/dev/null | awk '{print $2}')
-                    fi
+                    # if [[ "$mount_type" == "media" ]]; then
+                    #     img_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
+                    # else
+                    #     img_loop=$(docker exec ${emby_name} grep "^config " /ailg/.loop 2>/dev/null | awk '{print $2}')
+                    # fi
                     
                     
                     if [ -n "$img_loop" ] && mount "$img_loop" ${img_mount}; then
