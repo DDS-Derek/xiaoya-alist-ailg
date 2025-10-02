@@ -2,6 +2,19 @@
 # shellcheck shell=sh
 # shellcheck disable=SC2114
 
+# 日志函数
+INFO() {
+    echo "[INFO] $*"
+}
+
+WARN() {
+    echo "[WARN] $*"
+}
+
+ERROR() {
+    echo "[ERROR] $*"
+}
+
 # 检测并同步.loop文件到/ailg_config
 sync_loop_files() {
     # 检查是否存在/ailg_config目录
