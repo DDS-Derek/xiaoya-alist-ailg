@@ -158,35 +158,42 @@ get_loop_device() {
                 if ! losetup -a | grep -q "^$loop_device:"; then
                     INFO "成功解除loop设备绑定: $loop_device" >&2
                 else
-                    WARN "losetup -d可能未完全成功，但继续尝试重新绑定" >&2
+                    WARN "losetup -d失败，将获取新的loop设备" >&2
+                    loop_device=""
                 fi
             else
                 INFO "容器中无/media.img相关的loop绑定，使用.loop中的设备号" >&2
             fi
             
-            if losetup -o "$offset" "$loop_device" "/$img_file"; then
-                if mount "$loop_device" "$mount_dir"; then
-                    local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
-                    
-                    if [[ "$current_path" =~ ^/@ ]]; then
-                        current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+            if [ -n "$loop_device" ]; then
+                if losetup -o "$offset" "$loop_device" "/$img_file"; then
+                    if mount "$loop_device" "$mount_dir"; then
+                        local current_path=$(cat /proc/self/mountinfo | grep -o "\/.*\.img /$img_file" | cut -d' ' -f1)
+                        
+                        if [[ "$current_path" =~ ^/@ ]]; then
+                            current_path=$(echo "$current_path" | sed 's|^/[^/]*||')
+                        fi
+                        
+                        update_loop_files "$img_type" "$loop_device" "$current_path"
+                        INFO "成功绑定并挂载: $loop_device -> /$img_file" >&2
+                        return 0
+                    else
+                        losetup -d "$loop_device"
+                        return 1
                     fi
-                    
-                    update_loop_files "$img_type" "$loop_device" "$current_path"
-                    INFO "成功绑定并挂载: $loop_device -> /$img_file" >&2
-                    return 0
                 else
-                    losetup -d "$loop_device"
-                    return 1
+                    WARN "重新绑定loop设备失败，将获取新的loop设备" >&2
+                    loop_device=""
                 fi
-            else
-                ERROR "绑定loop设备失败: $loop_device -> /$img_file"
-                return 1
             fi
         fi
     fi
     
-    INFO "未找到/ailg/.loop文件，获取新的loop设备" >&2
+    if [ -z "$loop_device" ]; then
+        INFO "获取新的loop设备" >&2
+    else
+        INFO "未找到/ailg/.loop文件，获取新的loop设备" >&2
+    fi
     new_loop=$(losetup -f)
     
     if [ -n "$new_loop" ] && [ ! -e "$new_loop" ]; then
