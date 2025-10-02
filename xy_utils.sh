@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 # ——————————————————————————————————————————————————————————————————————————————————
 #  $$$$$$\          $$$$$$$\   $$$$$$\  $$\   $$\ 
@@ -53,16 +53,11 @@ function WARN() {
     echo -e "${WARN} ${1}"
 }
 
-# ——————————————————————————————————————————————————————————————————————————————————
-# 系统检查函数
-# ——————————————————————————————————————————————————————————————————————————————————
 
-# 检查命令是否存在
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# 检查是否以root用户运行
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         ERROR "此脚本必须以 root 身份运行！"
@@ -71,7 +66,6 @@ check_root() {
     fi
 }
 
-# 检查和安装依赖
 check_env() {
     local required_commands=(
         "curl" "wget"
@@ -110,7 +104,6 @@ check_env() {
     return 0
 }
 
-# 安装命令
 install_command() {
     local pkg="$1"
 
@@ -124,7 +117,6 @@ install_command() {
         "grep"|"cp"|"mv"|"awk"|"sed"|"stat"|"du"|"df") pkg="coreutils" ;;
     esac
 
-    # 尝试使用不同的包管理器安装
     if command -v apt-get &> /dev/null; then
         apt-get update -y
         apt-get install -y "$pkg"
@@ -161,7 +153,6 @@ install_command() {
         return 1
     fi
 
-    # 验证安装是否成功
     if ! command -v "$pkg" &> /dev/null; then
         ERROR "$pkg 安装失败"
         return 1
@@ -170,7 +161,6 @@ install_command() {
     return 0
 }
 
-# Docker相关检查
 function _install_docker() {
     if ! command -v docker &> /dev/null; then
         WARN "docker 未安装，脚本尝试自动安装..."
@@ -187,7 +177,6 @@ function _install_docker() {
     fi
 }
 
-# 检查QNAP系统
 check_qnap() {
     if grep -Eqi "QNAP" /etc/issue > /dev/null 2>&1; then
         INFO "检测到您是QNAP威联通系统，正在尝试更新安装环境，以便速装emby/jellyfin……"
@@ -238,11 +227,7 @@ check_qnap() {
     fi
 }
 
-# ——————————————————————————————————————————————————————————————————————————————————
-# 通用工具函数
-# ——————————————————————————————————————————————————————————————————————————————————
 
-# 路径检查
 check_path() {
     dir_path=$1
     if [[ ! -d "$dir_path" ]]; then
@@ -267,7 +252,6 @@ check_path() {
     fi
 }
 
-# 检查容器是否安装
 setup_status() {
     if docker container inspect "${1}" > /dev/null 2>&1; then
         echo -e "${Green}已安装${NC}"
@@ -276,7 +260,6 @@ setup_status() {
     fi
 }
 
-# 端口检查
 check_port() {
     local check_command result
     local port_conflict=0
@@ -352,7 +335,6 @@ check_port() {
     return $port_conflict
 }
 
-# 空间检查
 check_space() {
     free_size=$(df -P "$1" | tail -n1 | awk '{print $4}')
     free_size_G=$((free_size / 1024 / 1024))
@@ -365,7 +347,6 @@ check_space() {
     fi
 }
 
-# 检查loop回循设备支持
 check_loop_support() {
     if [ ! -e /dev/loop-control ]; then
         if ! lsmod | awk '$1 == "loop"'; then
@@ -384,12 +365,9 @@ check_loop_support() {
         fi
     fi
 
-    # 动态获取可用的loop设备进行测试
     test_loop_device=""
     
-    # 尝试使用 losetup -f 获取下一个可用的loop设备
     if test_loop_device=$(losetup -f 2>/dev/null) && [ -n "$test_loop_device" ]; then
-        # 检查设备是否存在，如果不存在则创建
         if [ ! -e "$test_loop_device" ]; then
             loop_num=$(echo "$test_loop_device" | grep -o '[0-9]\+$')
             if ! mknod "$test_loop_device" b 7 "$loop_num" 2>/dev/null; then
@@ -432,11 +410,7 @@ check_loop_support() {
     fi
 }
 
-# ——————————————————————————————————————————————————————————————————————————————————
-# Docker相关操作
-# ——————————————————————————————————————————————————————————————————————————————————
 
-# Docker镜像拉取
 function docker_pull() {
     [ -z "${config_dir}" ] && get_config_path
     
@@ -530,25 +504,19 @@ function docker_pull() {
     fi
 }
 
-# 更新Docker镜像
 update_ailg() {
     [ -n "$1" ] && update_img="$1" || { ERROR "未指定更新镜像的名称"; exit 1; }
     [ -z "${config_dir}" ] && get_config_path
     
-    # 检查是否有容器使用此镜像
     local containers_info_file=""
     local containers_count=0
     
-    # 添加容器ID数组，避免重复处理同一个容器
     local processed_containers=()
     
-    # 检查是否有jq命令
     if command -v jq &> /dev/null; then
         containers_info_file="/tmp/containers_${update_img//[:\/]/_}.json"
         INFO "检查是否有容器依赖镜像 ${update_img}..."
-        # 查找使用此镜像的容器
         for container_id in $(docker ps -a --filter "ancestor=${update_img}" --format "{{.ID}}"); do
-            # 检查该容器ID是否已经处理过
             local already_processed=0
             for processed_id in "${processed_containers[@]}"; do
                 if [[ "$processed_id" == "$container_id" ]]; then
@@ -557,31 +525,25 @@ update_ailg() {
                 fi
             done
             
-            # 如果已处理过，则跳过
             if [[ $already_processed -eq 1 ]]; then
                 continue
             fi
             
-            # 添加到已处理数组
             processed_containers+=("$container_id")
             containers_count=$((containers_count + 1))
             
-            # 获取容器详细信息并保存
             docker inspect "$container_id" >> "$containers_info_file"
             
             container_name=$(docker inspect --format '{{.Name}}' "$container_id" | sed 's/^\///')
             INFO "找到依赖容器: $container_name (ID: $container_id)"
             
-            # 删除容器
             INFO "删除容器 $container_name..."
             docker rm -f "$container_id"
         done
     else
         containers_info_file="/tmp/containers_${update_img//[:\/]/_}.txt"
         INFO "检查是否有容器依赖镜像 ${update_img}..."
-        # 查找使用此镜像的容器
         for container_id in $(docker ps -a --filter "ancestor=${update_img}" --format "{{.ID}}"); do
-            # 检查该容器ID是否已经处理过
             local already_processed=0
             for processed_id in "${processed_containers[@]}"; do
                 if [[ "$processed_id" == "$container_id" ]]; then
@@ -590,66 +552,52 @@ update_ailg() {
                 fi
             done
             
-            # 如果已处理过，则跳过
             if [[ $already_processed -eq 1 ]]; then
                 continue
             fi
             
-            # 添加到已处理数组
             processed_containers+=("$container_id")
             containers_count=$((containers_count + 1))
             
-            # 获取容器名称
             container_name=$(docker inspect --format '{{.Name}}' "$container_id" | sed 's/^\///')
             INFO "找到依赖容器: $container_name (ID: $container_id)"
             
-            # 获取容器状态
             container_status=$(docker inspect --format '{{.State.Status}}' "$container_id")
             echo "CONTAINER_STATUS=$container_status" >> "$containers_info_file"
             
-            # 获取容器基本信息并保存
             echo "CONTAINER_NAME=$container_name" >> "$containers_info_file"
             
-            # 获取网络模式
             network_mode=$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$container_id")
             echo "NETWORK_MODE=$network_mode" >> "$containers_info_file"
             
-            # 获取重启策略
             restart_policy=$(docker inspect --format '{{.HostConfig.RestartPolicy.Name}}' "$container_id")
             echo "RESTART_POLICY=$restart_policy" >> "$containers_info_file"
             
-            # 获取特权模式
             privileged=$(docker inspect --format '{{.HostConfig.Privileged}}' "$container_id")
             echo "PRIVILEGED=$privileged" >> "$containers_info_file"
             
-            # 获取挂载点（过滤掉匿名卷）
             echo "MOUNTS_START" >> "$containers_info_file"
             docker inspect "$container_id" --format '{{range .Mounts}}{{if eq .Type "bind"}}{{.Source}}:{{.Destination}} {{end}}{{end}}' >> "$containers_info_file"
             echo "MOUNTS_END" >> "$containers_info_file"
             
-            # 获取环境变量
             echo "ENV_START" >> "$containers_info_file"
             docker inspect --format '{{range .Config.Env}}{{.}} {{end}}' "$container_id" >> "$containers_info_file"
             echo "ENV_END" >> "$containers_info_file"
             
-            # 获取端口映射（修正格式）
             echo "PORTS_START" >> "$containers_info_file"
             docker inspect --format '{{range $p, $conf := .HostConfig.PortBindings}}{{(index $conf 0).HostPort}}:{{$p}} {{end}}' "$container_id" >> "$containers_info_file"
             echo "PORTS_END" >> "$containers_info_file"
             
             echo "CONTAINER_END" >> "$containers_info_file"
             
-            # 删除容器
             INFO "删除容器 $container_name..."
             docker rm -f "$container_id"
         done
     fi
     
-    # 备份旧镜像
     docker rmi "${update_img}_old" > /dev/null 2>&1
     docker tag "${update_img}" "${update_img}_old" > /dev/null 2>&1
     
-    # 获取本地和远程SHA
     if [ -f $config_dir/ailg_sha.txt ]; then
         local_sha=$(grep -E "${update_img}" "$config_dir/ailg_sha.txt" | awk '{print $2}')
     else
@@ -673,12 +621,9 @@ update_ailg() {
         done
     fi
 
-    # 判断是否需要更新
     if [ "$local_sha" != "$remote_sha" ] || { [ -z "$local_sha" ] && [ -z "$remote_sha" ]; } || ! docker inspect "${update_img}" &>/dev/null; then
-        # 删除旧镜像
         docker rmi "${update_img}" > /dev/null 2>&1
         
-        # 尝试拉取新镜像
         retries=0
         max_retries=3
         update_success=false
@@ -694,14 +639,11 @@ update_ailg() {
             fi
         done
         
-        # 处理更新结果
         if [ "$update_success" = true ]; then
             INFO "镜像更新成功，准备恢复容器..."
             docker rmi "${update_img}_old" > /dev/null 2>&1
             
-            # 恢复容器
             if [ $containers_count -gt 0 ] && [ -f "$containers_info_file" ]; then
-                # 检查是否有jq命令
                 if command -v jq &> /dev/null && [[ "$containers_info_file" == *".json" ]]; then
                     restore_containers "$containers_info_file" "${update_img}"
                 else
@@ -714,9 +656,7 @@ update_ailg() {
             ERROR "${update_img} 镜像拉取失败，已达到最大重试次数！将回滚到旧版本..."
             docker tag "${update_img}_old" "${update_img}" > /dev/null 2>&1
             
-            # 恢复容器
             if [ $containers_count -gt 0 ] && [ -f "$containers_info_file" ]; then
-                # 检查是否有jq命令
                 if command -v jq &> /dev/null && [[ "$containers_info_file" == *".json" ]]; then
                     restore_containers "$containers_info_file" "${update_img}"
                 else
@@ -730,9 +670,7 @@ update_ailg() {
     else
         INFO "${update_img} 镜像已是最新版本，无需更新！"
         docker rmi "${update_img}_old" > /dev/null 2>&1
-        # 恢复容器
         if [ $containers_count -gt 0 ] && [ -f "$containers_info_file" ]; then
-            # 检查是否有jq命令
             if command -v jq &> /dev/null && [[ "$containers_info_file" == *".json" ]]; then
                 restore_containers "$containers_info_file" "${update_img}"
             else
@@ -743,7 +681,6 @@ update_ailg() {
     fi
 }
 
-# 恢复容器
 restore_containers() {
     local containers_file="$1"
     local image_name="$2"
@@ -752,17 +689,12 @@ restore_containers() {
     
     INFO "开始恢复依赖镜像 ${image_name} 的容器..."
     
-    # 解析JSON文件中的容器信息
     for container_id in $(jq -r '.[].Id' "$containers_file"); do
-        # 从保存的信息中提取容器配置
         local container_json=$(jq -r ".[] | select(.Id==\"$container_id\")" "$containers_file")
         local name=$(echo "$container_json" | jq -r '.Name' | sed 's/^\///')
-        # local cmd=$(echo "$container_json" | jq -r '.Config.Cmd[]?' 2>/dev/null | tr '\n' ' ')
-        # local entrypoint=$(echo "$container_json" | jq -r '.Config.Entrypoint[]?' 2>/dev/null | tr '\n' ' ')
         local network_mode=$(echo "$container_json" | jq -r '.HostConfig.NetworkMode')
         local restart_policy=$(echo "$container_json" | jq -r '.HostConfig.RestartPolicy.Name')
         
-        # 提取挂载点（过滤掉匿名卷）
         local mounts=""
         while read -r mount; do
             local source=$(echo "$mount" | jq -r '.Source')
@@ -770,7 +702,6 @@ restore_containers() {
             local type=$(echo "$mount" | jq -r '.Type')
             local vol_name=$(echo "$mount" | jq -r '.Name')
             
-            # 过滤掉匿名卷（类型为volume且名称为空，或者路径包含@docker/volumes）
             if [ "$type" != "volume" ] || [ -n "$vol_name" ]; then
                 if [[ "$source" != *"@docker/volumes"* ]]; then
                     [ -n "$source" ] && [ -n "$destination" ] && mounts="$mounts -v $source:$destination"
@@ -778,13 +709,11 @@ restore_containers() {
             fi
         done < <(echo "$container_json" | jq -c '.Mounts[]?')
         
-        # 提取环境变量
         local env_vars=""
         while read -r env; do
             [ -n "$env" ] && env_vars="$env_vars -e \"$env\""
         done < <(echo "$container_json" | jq -r '.Config.Env[]?')
         
-        # 提取端口映射
         local ports=""
         local port_bindings=$(echo "$container_json" | jq -r '.HostConfig.PortBindings')
         if [ "$port_bindings" != "null" ] && [ "$port_bindings" != "{}" ]; then
@@ -795,46 +724,35 @@ restore_containers() {
             done < <(echo "$port_bindings" | jq -r 'to_entries[] | "\(.key):\(.value[0].HostPort)"')
         fi
         
-        # 提取其他重要参数
         local privileged=$(echo "$container_json" | jq -r '.HostConfig.Privileged')
         local privileged_param=""
         [ "$privileged" = "true" ] && privileged_param="--privileged"
         
-        # 构建运行命令
         local run_cmd="docker run -d --name \"$name\" $privileged_param"
         
-        # 添加网络模式
         if [ "$network_mode" = "host" ]; then
             run_cmd="$run_cmd --net=host"
         elif [ -n "$network_mode" ] && [ "$network_mode" != "default" ]; then
             run_cmd="$run_cmd --net=$network_mode"
         fi
         
-        # 添加重启策略
         if [ -n "$restart_policy" ] && [ "$restart_policy" != "no" ]; then
             run_cmd="$run_cmd --restart=$restart_policy"
         fi
         
-        # 添加挂载点、环境变量和端口
         [ -n "$mounts" ] && run_cmd="$run_cmd $mounts"
         [ -n "$env_vars" ] && run_cmd="$run_cmd $env_vars"
         [ -n "$ports" ] && run_cmd="$run_cmd $ports"
         
-        # 添加镜像名称
         run_cmd="$run_cmd $image_name"
         
-        # # 添加入口点和命令
-        # [ -n "$entrypoint" ] && run_cmd="$run_cmd --entrypoint=\"$entrypoint\""
-        # [ -n "$cmd" ] && run_cmd="$run_cmd $cmd"
         
         container_status=$(echo "$container_json" | jq -r '.State.Status')
-        # 执行命令
         INFO "恢复容器 $name..."
         if eval "$run_cmd"; then
             if [ "$container_status" = "running" ]; then
                 INFO "容器 $name 恢复并启动成功"
             else
-                # 如果原容器不是running状态，创建后停止它
                 INFO "容器 $name 恢复成功，正在恢复到原始状态（停止）..."
                 docker stop "$name" > /dev/null 2>&1
                 INFO "容器 $name 已停止，与原始状态一致"
@@ -846,7 +764,6 @@ restore_containers() {
         fi
     done
     
-    # 清理临时文件
     rm -f "$containers_file"
     
     INFO "容器恢复完成: 成功 $restored_count, 失败 $failed_count"
@@ -858,7 +775,6 @@ restore_containers() {
     fi
 }
 
-# 使用docker inspect --format恢复容器的简化函数
 restore_containers_simple() {
     local containers_file="$1"
     local image_name="$2"
@@ -867,7 +783,6 @@ restore_containers_simple() {
     
     INFO "开始恢复依赖镜像 ${image_name} 的容器..."
     
-    # 解析文本文件中的容器信息
     local container_name=""
     local network_mode=""
     local restart_policy=""
@@ -882,10 +797,8 @@ restore_containers_simple() {
     
     while IFS= read -r line; do
         if [[ "$line" == CONTAINER_NAME=* ]]; then
-            # 如果已经处理过一个容器，先恢复它
             if [ -n "$container_name" ]; then
                 restore_single_container
-                # 重置变量
                 container_name=""
                 network_mode=""
                 restart_policy=""
@@ -916,9 +829,7 @@ restore_containers_simple() {
         elif [[ "$line" == CONTAINER_STATUS=* ]]; then
             container_status="${line#CONTAINER_STATUS=}"
         elif [[ "$line" == "CONTAINER_END" ]]; then
-            # 恢复容器
             restore_single_container
-            # 重置变量
             container_name=""
             network_mode=""
             restart_policy=""
@@ -936,12 +847,10 @@ restore_containers_simple() {
         fi
     done < "$containers_file"
     
-    # 处理最后一个容器（如果有）
     if [ -n "$container_name" ]; then
         restore_single_container
     fi
     
-    # 清理临时文件
     rm -f "$containers_file"
     
     INFO "容器恢复完成: 成功 $restored_count, 失败 $failed_count"
@@ -952,59 +861,48 @@ restore_containers_simple() {
         return 0
     fi
     
-    # 内部函数：恢复单个容器
     function restore_single_container() {
-        # 构建运行命令 - 始终使用docker run -d
         local run_cmd="docker run -d --name \"$container_name\""
         
-        # 添加网络模式
         if [ "$network_mode" = "host" ]; then
             run_cmd="$run_cmd --net=host"
         elif [ -n "$network_mode" ] && [ "$network_mode" != "default" ]; then
             run_cmd="$run_cmd --net=$network_mode"
         fi
         
-        # 添加重启策略
         if [ -n "$restart_policy" ] && [ "$restart_policy" != "no" ]; then
             run_cmd="$run_cmd --restart=$restart_policy"
         fi
         
-        # 添加特权模式
         if [ "$privileged" = "true" ]; then
             run_cmd="$run_cmd --privileged"
         fi
         
-        # 添加挂载点
         for mount in $mounts; do
             if [[ "$mount" == *":"* ]]; then
                 run_cmd="$run_cmd -v $mount"
             fi
         done
         
-        # 添加环境变量
         for env in $env_vars; do
             if [ -n "$env" ]; then
                 run_cmd="$run_cmd -e \"$env\""
             fi
         done
         
-        # 添加端口映射
         for port in $ports; do
             if [[ "$port" == *":"* ]]; then
                 run_cmd="$run_cmd -p $port"
             fi
         done
         
-        # 添加镜像名称
         run_cmd="$run_cmd $image_name"
         
-        # 执行命令
         INFO "恢复容器 $container_name..."
         if eval "$run_cmd"; then
             if [ "$container_status" = "running" ]; then
                 INFO "容器 $container_name 恢复并启动成功"
             else
-                # 如果原容器不是running状态，创建后停止它
                 INFO "容器 $container_name 恢复成功，正在恢复到原始状态（停止）..."
                 docker stop "$container_name" > /dev/null 2>&1
                 INFO "容器 $container_name 已停止，与原始状态一致"
@@ -1018,13 +916,10 @@ restore_containers_simple() {
 }
 
 xy_media_reunzip() {
-    # 初始化变量
     running_container_id=""
     
-    # 添加特殊的SIGINT处理，确保Ctrl+C能立即终止脚本
     trap 'echo -e "\n${INFO} 检测到Ctrl+C，立即终止脚本"; exit 1' SIGINT
     
-    # Files to process mapping - 使用普通数组代替关联数组
     FILE_OPTIONS=(
         "all.mp4"
         "115.mp4"
@@ -1047,33 +942,24 @@ xy_media_reunzip() {
         "Music"
     )
 
-    # --- Cleanup Function ---
     cleanup() {
         INFO "Attempting cleanup..."
 
-        # 终止所有可能的子进程
         local script_pid=$$
         
-        # 检查pkill命令是否可用
         if command -v pkill &>/dev/null; then
-            # 首先尝试使用SIGTERM终止子进程
             pkill -TERM -P $script_pid 2>/dev/null || true
             sleep 1
-            # 如果子进程仍然存在，使用SIGKILL终止
             pkill -KILL -P $script_pid 2>/dev/null || true
         else
-            # 如果pkill不可用，尝试使用ps和kill组合
             if command -v ps &>/dev/null; then
-                # 获取所有子进程PID
                 local child_pids=$(ps -o pid --no-headers --ppid $script_pid 2>/dev/null)
                 if [ -n "$child_pids" ]; then
                     INFO "终止子进程: $child_pids"
-                    # 先尝试SIGTERM
                     for pid in $child_pids; do
                         kill -TERM $pid 2>/dev/null || true
                     done
                     sleep 1
-                    # 再尝试SIGKILL
                     for pid in $child_pids; do
                         kill -KILL $pid 2>/dev/null || true
                     done
@@ -1083,14 +969,12 @@ xy_media_reunzip() {
             fi
         fi
         
-        # 终止可能的Docker容器
         if [ -n "$running_container_id" ]; then
             INFO "Stopping running Docker container..."
             docker stop $running_container_id >/dev/null 2>&1 || true
             docker rm $running_container_id >/dev/null 2>&1 || true
         fi
         
-        # Unmount if mounted
         if [ -n "$img_mount" ] && mount | grep -q " ${img_mount} "; then
             INFO "Unmounting ${img_mount}..."
             umount "${img_mount}" || WARN "Failed to unmount ${img_mount}"
@@ -1098,18 +982,12 @@ xy_media_reunzip() {
         
         INFO "Cleanup attempt finished."
         
-        # 强制退出脚本，确保不会继续执行
-        # 注意：这会导致trap再次被触发，但由于我们使用exit 1而不是kill，不会导致无限循环
         exit 1
     }
-    # 捕获EXIT、SIGHUP、SIGINT和SIGTERM信号
     trap cleanup EXIT SIGHUP SIGINT SIGTERM
 
-    # --- File Processing Functions ---
     prepare_directories() {
-        # Remove old directories in intermediate_dir based on files to process
         for file_to_download in "${files_to_process[@]}"; do
-            # 查找文件在FILE_OPTIONS中的索引
             local idx=-1
             for i in "${!FILE_OPTIONS[@]}"; do
                 if [ "${FILE_OPTIONS[$i]}" = "$file_to_download" ]; then
@@ -1118,14 +996,12 @@ xy_media_reunzip() {
                 fi
             done
             
-            # 如果找到了索引，获取对应的目录
             if [ $idx -ge 0 ]; then
                 local dir_names_str="${FILE_DIRS[$idx]}"
                 if [ "$file_to_download" == "config.mp4" ]; then
                     INFO "删除旧的config目录: ${img_mount}/config"
                     rm -rf "${img_mount:?}/config" # Protect against empty vars
                 else
-                    # Handle multiple dirs for all.mp4
                     IFS=' ' read -r -a dir_array <<< "$dir_names_str"
                     for dir_name_part in "${dir_array[@]}"; do
                         if [ -n "$dir_name_part" ]; then # Ensure not empty
@@ -1142,7 +1018,6 @@ xy_media_reunzip() {
         local file_to_download=$1
         INFO "处理文件: $file_to_download"
         
-        # 检查文件是否已存在且下载完成
         local skip_download=false
         if [ -f "${source_dir}/${file_to_download}" ] && [ ! -f "${source_dir}/${file_to_download}.aria2" ]; then
             INFO "文件 ${file_to_download} 已存在且下载完成，跳过下载步骤"
@@ -1156,27 +1031,21 @@ xy_media_reunzip() {
             return 1
         fi
         
-        # 添加处理中断的函数
         handle_interrupt() {
             INFO "检测到中断，正在清理..."
             
-            # 终止Docker容器
             if [ -n "$running_container_id" ]; then
                 docker stop $running_container_id >/dev/null 2>&1 || true
                 docker rm $running_container_id >/dev/null 2>&1 || true
                 running_container_id=""
             fi
             
-            # 终止所有可能的子进程
             local script_pid=$$
             
-            # 检查pkill命令是否可用
             if command -v pkill &>/dev/null; then
                 pkill -TERM -P $script_pid 2>/dev/null || true
             else
-                # 如果pkill不可用，尝试使用ps和kill组合
                 if command -v ps &>/dev/null; then
-                    # 获取所有子进程PID
                     local child_pids=$(ps -o pid --no-headers --ppid $script_pid 2>/dev/null)
                     if [ -n "$child_pids" ]; then
                         INFO "终止子进程: $child_pids"
@@ -1190,11 +1059,9 @@ xy_media_reunzip() {
             exit 1
         }
         
-        # 临时设置中断处理
         trap handle_interrupt SIGINT SIGTERM
         
         if [ "$skip_download" = true ]; then
-            # 直接解压已有文件
             running_container_id=$(docker run -d --rm --net=host \
                 -v "${source_dir}:/source_temp_dir" \
                 -v "${img_mount}:/dist" \
@@ -1207,12 +1074,10 @@ xy_media_reunzip() {
                             7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/xiaoya\" ; \
                         fi")
             
-            # 等待容器完成
             docker wait $running_container_id >/dev/null 2>&1
             extract_status=$?
             running_container_id=""
         else
-            # 下载并解压文件
             running_container_id=$(docker run -d --rm --net=host \
                 -v "${source_dir}:/source_temp_dir" \
                 -v "${img_mount}:/dist" \
@@ -1227,13 +1092,11 @@ xy_media_reunzip() {
                             7z x -aoa -bb1 -mmt=16 \"${file_to_download}\" -o\"/dist/xiaoya\" ; \
                         fi")
             
-            # 等待容器完成
             docker wait $running_container_id >/dev/null 2>&1
             extract_status=$?
             running_container_id=""
         fi
         
-        # 恢复原来的中断处理
         trap cleanup EXIT SIGHUP SIGINT SIGTERM
         
         if [ $extract_status -eq 0 ]; then
@@ -1291,7 +1154,6 @@ xy_media_reunzip() {
         INFO "所有选定文件所需总大小为: $total_size_gb GB"
     }
 
-    # --- Main Function ---
     media_reunzip_main() {
         if [[ $st_gbox =~ "未安装" ]]; then
             ERROR "请先安装G-Box，再执行本安装！"
@@ -1325,7 +1187,6 @@ xy_media_reunzip() {
             echo "请先配置 $config_dir/docker_address.txt，以便获取docker 地址"
             exit
         fi   
-        # Verify xiaoya address is accessible
         if ! curl -siL "${xiaoya_addr}/d/README.md" | grep -v 302 | grep -q "x-oss-"; then
             ERROR "无法连接到小雅alist: $xiaoya_addr"
             exit 1
@@ -1333,31 +1194,25 @@ xy_media_reunzip() {
         
         docker_addr="$xiaoya_addr"
         
-        # Ask user to select which files to process
         echo -e "\n请选择要重新下载和解压的文件:"
         
-        # 根据mount_type显示选择限制信息
         if [[ "$mount_type" == "config" ]]; then
             WARN "当前为config镜像挂载模式，只能选择 config.mp4 文件"
         elif [[ "$mount_type" == "media" ]]; then
             WARN "当前为媒体库镜像挂载模式，不能选择 config.mp4 文件"
         fi
         
-        # 使用FILE_OPTIONS数组代替file_options
-        # 初始化选择状态数组，0表示未选择，1表示已选择
         selected_status=()
         for ((i=0; i<${#FILE_OPTIONS[@]}; i++)); do
             selected_status[i]=0
         done
         
         while true; do
-            # Display current selection
             for index in "${!FILE_OPTIONS[@]}"; do
                 local file_opt="${FILE_OPTIONS[$index]}"
                 local status_char="×"; local color="$Red"
                 local disabled=""
                 
-                # 检查选择限制
                 if [[ "$mount_type" == "config" && "$file_opt" != "config.mp4" ]]; then
                     status_char="❌"; color="$Red"
                     disabled=" (不可选择)"
@@ -1373,15 +1228,12 @@ xy_media_reunzip() {
             printf "[ 0 ] 确认并继续\n"
             
             local select_input
-            # 使用-t选项设置超时，确保能够定期检查信号
             read -t 60 -erp "请输入序号(0-${#FILE_OPTIONS[@]})，可用逗号分隔多选，或按Ctrl+C退出: " select_input || {
-                # 如果read超时，提示用户并继续
                 echo ""
                 INFO "等待输入超时，请重新输入或按Ctrl+C退出"
                 continue
             }
             
-            # 处理输入为0的情况
             if [[ "$select_input" == "0" ]]; then
                 local count_selected=0
                 for ((i=0; i<${#selected_status[@]}; i++)); do
@@ -1397,15 +1249,11 @@ xy_media_reunzip() {
                 continue
             fi
             
-            # 替换中文逗号为英文逗号
             select_input=${select_input//，/,}
             
-            # 分割输入的序号
             IFS=',' read -ra select_nums <<< "$select_input"
             
-            # 处理每个序号
             for select_num in "${select_nums[@]}"; do
-                # 去除空格
                 select_num=$(echo "$select_num" | tr -d ' ')
                 
                 if [[ "$select_num" =~ ^[0-9]+$ ]]; then
@@ -1413,7 +1261,6 @@ xy_media_reunzip() {
                         idx=$((select_num-1))
                         local file_to_select="${FILE_OPTIONS[$idx]}"
                         
-                        # 检查选择合法性
                         local selection_valid=true
                         if [[ "$mount_type" == "config" && "$file_to_select" != "config.mp4" ]]; then
                             ERROR "配置镜像模式下只能选择 config.mp4 文件"
@@ -1423,7 +1270,6 @@ xy_media_reunzip() {
                             selection_valid=false
                         fi
                         
-                        # 如果选择合法，则切换选择状态
                         if [ "$selection_valid" = true ]; then
                             selected_status[$idx]=$((1 - selected_status[$idx]))
                             if [ "${selected_status[$idx]}" -eq 1 ]; then
@@ -1441,7 +1287,6 @@ xy_media_reunzip() {
             done
         done
         
-        # Create array of files to process
         files_to_process=()
         for index in "${!FILE_OPTIONS[@]}"; do
             if [ "${selected_status[$index]}" -eq 1 ]; then
@@ -1451,7 +1296,6 @@ xy_media_reunzip() {
         
         INFO "将处理以下文件: ${files_to_process[*]}"
         
-        # 获取用户输入的source_dir并检查空间是否足够
         while true; do
             read -t 60 -erp "请输入临时存放下载文件的目录（默认：/tmp/xy_reunzip_source）: " source_dir || {
                 echo ""
@@ -1461,7 +1305,6 @@ xy_media_reunzip() {
             source_dir=${source_dir:-/tmp/xy_reunzip_source}
             check_path "$source_dir"
             
-            # 获取所有选定文件的总大小
             get_remote_file_sizes "${files_to_process[@]}"
 
             if check_space "$source_dir" "$total_size_gb"; then
@@ -1479,20 +1322,16 @@ xy_media_reunzip() {
             fi
         done
 
-        # Prepare directories for processing
         prepare_directories
         
-        # 解压后的文件通常比原始文件大1.5倍
         required_intermediate_gb=$(awk "BEGIN {printf \"%.0f\", $total_size_gb * 1.5}")
         
-        # 检查镜像空间是否足够
         if ! check_space "$img_mount" "$required_intermediate_gb"; then
             WARN "${img_path}镜像空间不足，请在一键脚本主菜单选择X再选择6对其扩容后重试！"
             exit 1
         fi
 
         
-        # Process each selected file
         for file_to_process in "${files_to_process[@]}"; do
             if ! download_and_extract "$file_to_process"; then
                 ERROR "文件 $file_to_process 处理失败，请手动删除${source_dir}/${file_to_process}文件"
@@ -1501,7 +1340,6 @@ xy_media_reunzip() {
             fi
         done
         
-        # Final success message
         INFO "所有文件处理完成"
         umount "$img_mount" && INFO "镜像卸载完成" || WARN "卸载 $img_mount 失败"
         [ -n "${emby_name}" ] && docker start "${emby_name}" || INFO "容器 ${emby_name} 未启动"
@@ -1511,17 +1349,11 @@ xy_media_reunzip() {
     media_reunzip_main "$@"
 }
 
-# 初始化颜色
 setup_colors
 
-# 导出颜色变量
 export Blue Green Red Yellow NC INFO ERROR WARN
 
-# ——————————————————————————————————————————————————————————————————————————————————
-# Emby 6908端口屏蔽功能
-# ——————————————————————————————————————————————————————————————————————————————————
 
-# 获取docker0网桥IP
 get_docker0_ip() {
     if command -v ifconfig > /dev/null 2>&1; then
         docker0=$(ifconfig docker0 | awk '/inet / {print $2}' | sed 's/addr://')
@@ -1531,7 +1363,6 @@ get_docker0_ip() {
     echo "$docker0"
 }
 
-# 等待Emby容器启动
 wait_emby_start() {
     local container_name="$1"
     local TARGET_LOG_LINE_SUCCESS="All entry points have started"
@@ -1557,7 +1388,6 @@ wait_emby_start() {
     done
 }
 
-# 等待G-Box容器启动
 wait_gbox_start() {
     local container_name="$1"
     local TARGET_LOG_LINE_SUCCESS="load storages completed"
@@ -1566,18 +1396,15 @@ wait_gbox_start() {
     
     INFO "等待G-Box容器 ${container_name} 启动..."
     
-    # 使用tail -f实时监控日志，避免遗漏
     timeout $timeout docker exec "$container_name" tail -f /opt/alist/log/alist.log 2>&1 | while IFS= read -r line; do
         echo -e "$line"
         
         if [[ "$line" == *"$TARGET_LOG_LINE_SUCCESS"* ]]; then
             INFO "G-Box容器 ${container_name} 启动成功！"
-            # 发送信号给父进程表示成功
             kill -USR1 $$ 2>/dev/null || true
             break
         fi
         
-        # 检查超时
         local current_time=$(date +%s)
         local elapsed_time=$((current_time - start_time))
         if [ "$elapsed_time" -gt $timeout ]; then
@@ -1587,7 +1414,6 @@ wait_gbox_start() {
         fi
     done
     
-    # 检查退出状态
     local exit_code=$?
     if [ $exit_code -eq 124 ]; then
         WARN "G-Box容器 ${container_name} 未正常启动超时 10 分钟！"
@@ -1600,7 +1426,6 @@ wait_gbox_start() {
     fi
 }
 
-# Emby 6908端口屏蔽功能
 emby_close_6908_port() {
     echo -e "${Yellow}此功能关闭 6908 访问是通过将 Emby 设置为桥接模式并取消端口映射，非防火墙屏蔽！！！${Font}"
     echo -e "${Yellow}如果您使用此功能关闭 6908 访问，那您无法再使用浏览器访问 6908 端口使用 Emby！！！${Font}"
@@ -1623,15 +1448,12 @@ emby_close_6908_port() {
         return 0
     fi
 
-    # 获取G-Box容器名称和配置目录
     get_config_path
     local gbox_name="$docker_name"
     local config_dir="$config_dir"
     
-    # 获取Emby容器名称（通过挂载/media.img的特征查找，且镜像名包含emby）
     local emby_name="$(docker ps -a -q | while read container_id; do
         if docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' "$container_id" | grep -qE "/xiaoya$ /media|\.img /media\.img"; then
-            # 检查镜像名是否包含emby
             image_name=$(docker inspect --format '{{.Config.Image}}' "$container_id")
             if [[ "$image_name" == *"emby"* ]]; then
                 container_name=$(docker ps -a --format '{{.Names}}' --filter "id=$container_id")
@@ -1641,19 +1463,16 @@ emby_close_6908_port() {
         fi
     done | head -n1)"
     
-    # 如果没找到，使用默认名称
     emby_name=${emby_name:-emby}
     
     INFO "检测到G-Box容器: ${gbox_name}"
     INFO "检测到Emby容器: ${emby_name}"
     INFO "使用配置目录: ${config_dir}"
 
-    # 创建独立网络
     local NETWORK_NAME="only_for_emby"
     local SUBNET_CANDIDATES=("10.250.0.0/24" "10.250.1.0/24" "10.250.2.0/24" "10.251.0.0/24")
     local AVAILABLE_SUBNET ENBY_IP GATEWAY
     
-    # 删除已存在的网络
     if docker network inspect "$NETWORK_NAME" > /dev/null 2>&1; then
         local CONTAINERS=$(docker network inspect -f '{{range .Containers}}{{.Name}} {{end}}' "$NETWORK_NAME")
         if [ -n "$CONTAINERS" ]; then
@@ -1668,7 +1487,6 @@ emby_close_6908_port() {
         INFO "旧 ${NETWORK_NAME} 网络已删除"
     fi
 
-    # 查找可用子网
     for subnet in "${SUBNET_CANDIDATES[@]}"; do
         local conflict=0
         local existing_networks config
@@ -1702,7 +1520,6 @@ emby_close_6908_port() {
         "$NETWORK_NAME"
     INFO "网络 $NETWORK_NAME 创建成功！"
 
-    # 拉取runlike镜像
     if docker inspect ddsderek/runlike:latest > /dev/null 2>&1; then
         local local_sha remote_sha
         local_sha=$(docker inspect --format='{{index .RepoDigests 0}}' ddsderek/runlike:latest 2> /dev/null | cut -f2 -d:)
@@ -1715,11 +1532,9 @@ emby_close_6908_port() {
         docker_pull "ddsderek/runlike:latest"
     fi
     
-    # 获取容器配置
     INFO "获取 ${emby_name} 容器信息中..."
     docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp ddsderek/runlike -p "${emby_name}" > "/tmp/container_update_${emby_name}"
     
-    # 修改网络配置
     INFO "更改 Emby 为 only_for_emby 模式并取消端口映射中..."
     if grep -q 'network=host' "/tmp/container_update_${emby_name}"; then
         INFO "更改 host 网络模式为 only_for_emby 模式"
@@ -1732,13 +1547,11 @@ emby_close_6908_port() {
         sed -i "s/name=${emby_name}/name=${emby_name} --network=only_for_emby --ip=${ENBY_IP}/" "/tmp/container_update_${emby_name}"
     fi
     
-    # 移除6908端口映射
     if grep -q '6908:6908' "/tmp/container_update_${emby_name}"; then
         INFO "关闭 6908 端口映射"
         sed -i '/-p 6908:6908/d' "/tmp/container_update_${emby_name}"
     fi
     
-    # 更新xiaoya.host配置
     local docker0 xiaoya_host
     docker0=$(get_docker0_ip)
     xiaoya_host="127.0.0.1"  # 在only_for_emby网络中，使用127.0.0.1
@@ -1746,7 +1559,6 @@ emby_close_6908_port() {
     INFO "更改容器 host 配置"
     sed -i "s/--add-host xiaoya.host.*/--add-host xiaoya.host:${xiaoya_host} \\\/" "/tmp/container_update_${emby_name}"
     
-    # 停止和删除原容器
     if ! docker stop "${emby_name}" > /dev/null 2>&1; then
         if ! docker kill "${emby_name}" > /dev/null 2>&1; then
             ERROR "停止 ${emby_name} 容器失败！"
@@ -1760,7 +1572,6 @@ emby_close_6908_port() {
         return 1
     fi
     
-    # 重新创建容器
     if bash "/tmp/container_update_${emby_name}"; then
         rm -f "/tmp/container_update_${emby_name}"
         wait_emby_start "$emby_name"
@@ -1769,7 +1580,6 @@ emby_close_6908_port() {
         return 1
     fi
     
-    # 连接G-Box容器到新网络
     local gbox_network_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "${gbox_name}")
     if [[ "$gbox_network_mode" == "bridge" ]]; then
         INFO "G-Box容器使用bridge网络模式，自动加入 only_for_emby 网络中..."
@@ -1781,12 +1591,10 @@ emby_close_6908_port() {
         docker network connect only_for_emby "${gbox_name}" 2>/dev/null || WARN "无法将G-Box容器连接到 only_for_emby 网络"
     fi
     
-    # 更新emby_server.txt配置
     INFO "配置 emby_server.txt 文件中"
     echo "http://$ENBY_IP:6908" > "${config_dir}"/emby_server.txt
     chown -R 0:0 "${config_dir}/emby_server.txt" 2>/dev/null || true
     
-    # 重启G-Box容器
     INFO "重启G-Box容器"
     docker restart "${gbox_name}"
     wait_gbox_start "$gbox_name"
@@ -1795,10 +1603,265 @@ emby_close_6908_port() {
     INFO "现在只能通过 2345 端口访问 Emby，6908 端口已被屏蔽！"
 }
 
-# 导出函数
+
+cleanup_invalid_loops() {
+    INFO "开始清理无效的loop设备绑定..." >&2
+    
+    local loop_devices=$(losetup -a)
+    local cleaned_count=0
+    
+    echo "$loop_devices" | while IFS= read -r line; do
+        if [ -z "$line" ]; then
+            continue
+        fi
+        
+        local loop_device=$(echo "$line" | cut -d: -f1)
+        local back_file=""
+        
+        if echo "$line" | grep -q "("; then
+            back_file=$(echo "$line" | sed 's/.*(\([^)]*\)).*/\1/')
+        else
+            back_file=$(echo "$line" | awk '{print $NF}')
+        fi
+        
+        local should_cleanup=false
+        
+        if [ "$back_file" = "/" ]; then
+            should_cleanup=true
+            INFO "发现绑定到根目录的loop设备: $loop_device" >&2
+        elif [[ "$back_file" =~ ^/[^/]*\.img$ ]] && [ "$back_file" != "/config.img" ] && [ "$back_file" != "/media.img" ]; then
+            should_cleanup=true
+            INFO "发现无效绑定的loop设备: $loop_device -> $back_file" >&2
+        fi
+        
+        if [ "$should_cleanup" = true ]; then
+            INFO "正在清理loop设备: $loop_device" >&2
+            
+            if umount -l "$loop_device" 2>/dev/null; then
+                INFO "成功卸载: $loop_device" >&2
+            else
+                INFO "卸载失败或未挂载: $loop_device" >&2
+            fi
+            
+            if losetup -d "$loop_device" 2>/dev/null; then
+                if ! losetup -a | grep -q "^$loop_device:"; then
+                    INFO "成功解除绑定: $loop_device" >&2
+                    cleaned_count=$((cleaned_count + 1))
+                else
+                    WARN "解除绑定命令执行成功但设备仍存在: $loop_device" >&2
+                fi
+            else
+                WARN "解除绑定失败: $loop_device" >&2
+            fi
+        fi
+        
+    done
+    
+    if [ $cleaned_count -gt 0 ]; then
+        INFO "清理完成，共清理了 $cleaned_count 个无效的loop设备" >&2
+    else
+        INFO "未发现需要清理的无效loop设备" >&2
+    fi
+}
+
+get_loop_from_state_file() {
+    local img_file="$1"
+    local img_dir=$(dirname "$img_file")
+    local img_name=$(basename "$img_file")
+    local state_file=""
+    
+    if [[ "$img_name" =~ ^emby-ailg.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-ailg.*\.img$ ]]; then
+        state_file="$img_dir/.loop"
+    elif [[ "$img_name" =~ ^emby-config.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-config.*\.img$ ]]; then
+        state_file="$img_dir/.loop"
+    else
+        return 1
+    fi
+    
+    if [ -f "$state_file" ]; then
+        local img_type=""
+        local img_name=$(basename "$img_file")
+        
+        if [[ "$img_name" =~ ^emby-ailg.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-ailg.*\.img$ ]]; then
+            img_type="media"
+        elif [[ "$img_name" =~ ^emby-config.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-config.*\.img$ ]]; then
+            img_type="config"
+        else
+            return 1
+        fi
+        
+        local recorded_loop=$(grep "^$img_type " "$state_file" | awk '{print $2}')
+        if [ -n "$recorded_loop" ]; then
+            echo "$recorded_loop"
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+update_loop_state_file() {
+    local img_file="$1"
+    local loop_device="$2"
+    local img_dir=$(dirname "$img_file")
+    local img_name=$(basename "$img_file")
+    local state_file=""
+    
+    if [[ "$img_name" =~ ^emby-ailg.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-ailg.*\.img$ ]]; then
+        state_file="$img_dir/.loop"
+    elif [[ "$img_name" =~ ^emby-config.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-config.*\.img$ ]]; then
+        state_file="$img_dir/.loop"
+    else
+        ERROR "不支持的镜像文件类型: $img_name"
+        return 1
+    fi
+    
+    mkdir -p "$img_dir"
+    
+    local img_type=""
+    local img_name=$(basename "$img_file")
+    
+    if [[ "$img_name" =~ ^emby-ailg.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-ailg.*\.img$ ]]; then
+        img_type="media"
+    elif [[ "$img_name" =~ ^emby-config.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-config.*\.img$ ]]; then
+        img_type="config"
+    else
+        ERROR "不支持的镜像文件类型: $img_name"
+        return 1
+    fi
+    
+    local temp_file=$(mktemp)
+    local updated=false
+    
+    if [ -f "$state_file" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^$img_type\  ]]; then
+                echo "$img_type $loop_device $img_file" >> "$temp_file"
+                updated=true
+            else
+                echo "$line" >> "$temp_file"
+            fi
+        done < "$state_file"
+    fi
+    
+    if [ "$updated" = false ]; then
+        echo "$img_type $loop_device $img_file" >> "$temp_file"
+    fi
+    
+    mv "$temp_file" "$state_file"
+    INFO "已更新状态文件: $state_file -> $img_type: $loop_device" >&2
+}
+
+check_loop_binding() {
+    local img_file="$1"
+    local loop_device="$2"
+    
+    local binding_info=$(losetup -a | grep "^$loop_device:")
+    if [ -n "$binding_info" ]; then
+        local bound_file=""
+        
+        if echo "$binding_info" | grep -q "("; then
+            bound_file=$(echo "$binding_info" | sed 's/.*(\([^)]*\)).*/\1/')
+        else
+            bound_file=$(echo "$binding_info" | awk '{print $NF}')
+        fi
+        
+        if [ "$bound_file" = "$img_file" ]; then
+            return 0  # 已正确绑定
+        fi
+    fi
+    
+    return 1  # 未绑定或绑定错误
+}
+
+smart_bind_loop_device() {
+    local img_file="$1"
+    local offset="${2:-10000000}"
+    
+    if [ ! -f "$img_file" ]; then
+        ERROR "img文件不存在: $img_file"
+        return 1
+    fi
+    
+    INFO "开始智能绑定loop设备: $img_file" >&2
+    
+    cleanup_invalid_loops
+    
+    local loop_device=""
+    if loop_device=$(get_loop_from_state_file "$img_file"); then
+        INFO "从状态文件获取到loop设备: $loop_device" >&2
+        
+        if check_loop_binding "$img_file" "$loop_device"; then
+            INFO "loop设备 $loop_device 已正确绑定到 $img_file" >&2
+            echo "$loop_device"
+            return 0
+        else
+            INFO "loop设备 $loop_device 未正确绑定，尝试重新绑定" >&2
+            INFO "清理loop设备 $loop_device 的现有绑定" >&2
+            umount -l "$loop_device" 2>/dev/null
+            if losetup -d "$loop_device" 2>/dev/null; then
+                if ! losetup -a | grep -q "^$loop_device:"; then
+                    INFO "成功清理loop设备: $loop_device" >&2
+                else
+                    WARN "清理命令执行成功但设备仍存在: $loop_device" >&2
+                fi
+            else
+                WARN "清理loop设备失败: $loop_device" >&2
+            fi
+            
+            if losetup -o "$offset" "$loop_device" "$img_file"; then
+                INFO "成功重新绑定loop设备: $loop_device -> $img_file" >&2
+                update_loop_state_file "$img_file" "$loop_device"
+                echo "$loop_device"
+                return 0
+            else
+                INFO "重新绑定失败，将获取新的loop设备" >&2
+            fi
+        fi
+    fi
+    
+    local existing_loop=""
+    if losetup -a | grep -q "("; then
+        existing_loop=$(losetup -a | grep "($img_file)" | head -n1 | cut -d: -f1)
+    else
+        existing_loop=$(losetup -a | grep " $img_file" | head -n1 | cut -d: -f1)
+    fi
+    if [ -n "$existing_loop" ]; then
+        INFO "发现已有loop设备绑定到此img文件: $existing_loop" >&2
+        update_loop_state_file "$img_file" "$existing_loop"
+        echo "$existing_loop"
+        return 0
+    fi
+    
+    loop_device=$(losetup -f)
+    if [ -z "$loop_device" ]; then
+        ERROR "无法获取可用的loop设备"
+        return 1
+    fi
+    
+    if [ ! -e "$loop_device" ]; then
+        local loop_num=$(echo "$loop_device" | grep -o '[0-9]\+$')
+        if ! mknod "$loop_device" b 7 "$loop_num" 2>/dev/null; then
+            ERROR "无法创建loop设备: $loop_device"
+            return 1
+        fi
+    fi
+    
+    if losetup -o "$offset" "$loop_device" "$img_file"; then
+        INFO "成功绑定loop设备: $loop_device -> $img_file" >&2
+        update_loop_state_file "$img_file" "$loop_device"
+        echo "$loop_device"
+        return 0
+    else
+        ERROR "绑定loop设备失败: $loop_device -> $img_file" >&2
+        return 1
+    fi
+}
+
 export -f INFO ERROR WARN \
     check_path check_port check_space check_root check_env check_loop_support check_qnap \
     setup_status command_exists \
     docker_pull update_ailg restore_containers restore_containers_simple \
     xy_media_reunzip \
-    emby_close_6908_port get_docker0_ip wait_emby_start wait_gbox_start
+    emby_close_6908_port get_docker0_ip wait_emby_start wait_gbox_start \
+    cleanup_invalid_loops get_loop_from_state_file update_loop_state_file check_loop_binding smart_bind_loop_device

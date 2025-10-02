@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # shellcheck shell=bash
 # shellcheck disable=SC2086
 
@@ -9,6 +9,7 @@ PATH=${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:
 export PATH
 
 function get_emby_image() {
+    # 设置默认版本号
     local version=${1:-"4.8.10.0"}
     
     cpu_arch=$(uname -m)
@@ -31,6 +32,7 @@ function get_emby_image() {
         ;;
     esac
 
+    # 检查镜像是否存在
     if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q ${emby_image}; then
         for i in {1..3}; do
             if docker_pull $emby_image; then
@@ -40,6 +42,7 @@ function get_emby_image() {
         done
     fi
 
+    # 验证镜像是否成功拉取
     docker images --format '{{.Repository}}:{{.Tag}}' | grep -q ${emby_image} || { ERROR "${emby_image}镜像拉取失败，请手动安装emby，无需重新运行本脚本，小雅媒体库在${media_dir}！" && exit 1; }
 }
 
@@ -242,19 +245,24 @@ get_emby_status() {
     local image_name      # 声明为局部变量
     while read -r container_id; do
         if docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' $container_id | grep -qE "/xiaoya$ /media|\.img /media\.img"; then
+            # 检查镜像名是否包含emby
             image_name=$(docker inspect --format '{{.Config.Image}}' "$container_id")
             if [[ "$image_name" == *"emby"* ]]; then
                 container_name=$(docker ps -a --format '{{.Names}}' --filter "id=$container_id")
                 
+                # 获取所有挂载信息
                 mount_info=$(docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' $container_id)
                 
+                # 分别提取 media.img 和 config.img 的主机路径
                 host_path=$(echo "$mount_info" | grep "\.img /media\.img$" | awk '{print $1}')
                 config_img_path=$(echo "$mount_info" | grep "\.img /config\.img$" | awk '{print $1}')
                 
+                # 如果没有找到 .img 文件，则查找 /xiaoya 挂载
                 if [ -z "$host_path" ]; then
                     host_path=$(echo "$mount_info" | grep "/xiaoya$ /media$" | awk '{print $1}')
                 fi
                 
+                # 构建存储结构，如果存在 config_img_path 则包含在内
                 if [ -n "$config_img_path" ]; then
                     emby_list+=("$container_name:$host_path:$config_img_path")
                 else
@@ -273,12 +281,15 @@ get_emby_status() {
             name=${emby_order[$index]}
             for entry in "${emby_list[@]}"; do
                 if [[ $entry == $name:* ]]; then
+                    # 提取各部分信息 - 使用更普适的方法
                     container_name=$(echo "$entry" | cut -d':' -f1)
                     host_path=$(echo "$entry" | cut -d':' -f2)
                     config_img_path=$(echo "$entry" | cut -d':' -f3)
                     
+                    # 显示基本信息
                     printf "[ %-1d ] 容器名: \033[1;33m%-20s\033[0m 媒体库路径: \033[1;33m%s\033[0m" $((index + 1)) $name $host_path
                     
+                    # 如果存在配置路径，则显示
                     if [ -n "$config_img_path" ]; then
                         printf " config镜像路径: \033[1;33m%s\033[0m" $config_img_path
                     fi
@@ -325,6 +336,7 @@ function user_jellyfin() {
     meta_select
     chmod 777 /tmp/update_meta_jf.sh
     docker run -i --security-opt seccomp=unconfined --rm --net=host -v /tmp:/tmp -v $media_dir:/media -v $config_dir:/etc/xiaoya -e LANG=C.UTF-8 ailg/ggbond:latest /tmp/update_meta_jf.sh
+    #dir=$(find $media_dir -type d -name "*config*" -print -quit)
     mv "$media_dir/jf_config" "$media_dir/confg"
     chmod -R 777 $media_dir/confg
     chmod -R 777 $media_dir/xiaoya
@@ -367,6 +379,7 @@ function user_jellyfin() {
 }
 
 function user_emby_fast() {
+    # 通用下载函数
     download_file_with_aria2c() {
         local file_name="$1"
         local target_dir="$2"
@@ -375,11 +388,13 @@ function user_emby_fast() {
         
         INFO "开始下载${file_type}文件 ${file_name}..."
         
+        # 验证远程大小参数
         if [[ -z $remote_size ]] || [[ $remote_size -lt 1 ]]; then
             ERROR "远程文件大小参数无效：$remote_size"
             return 1
         fi
         
+        # 构建下载URL
         local download_url
         if $use_115_path; then
             if [[ "${f4_select}" == "9" ]]; then
@@ -391,18 +406,21 @@ function user_emby_fast() {
             download_url="$docker_addr/d/ailg_jf/${down_path}/$file_name"
         fi
         
+        # 封装下载执行函数
         do_download() {
             docker exec $docker_name ali_clear -1 > /dev/null 2>&1
             docker run --rm --net=host -v $target_dir:/image ailg/ggbond:latest \
                 aria2c -o /image/$file_name --auto-file-renaming=false --allow-overwrite=true -c -x6 "$download_url"
         }
         
+        # 检查文件是否需要下载或更新
         need_download() {
             [[ ! -f $target_dir/$file_name ]] || \
             [[ -f $target_dir/$file_name.aria2 ]] || \
             [[ $remote_size -gt "$(du -b $target_dir/$file_name 2>/dev/null | cut -f1)" ]]
         }
         
+        # 主下载逻辑 - 最多尝试4次（1次初始 + 3次重试）
         for attempt in {1..3}; do
             if need_download; then
                 if [[ $attempt -eq 1 ]]; then
@@ -416,6 +434,7 @@ function user_emby_fast() {
             fi
         done
 
+        # 最终验证下载结果
         local final_local_size=$(du -b $target_dir/$file_name 2>/dev/null | cut -f1)
         if [[ -f $target_dir/$file_name.aria2 ]] || [[ $remote_size != "$final_local_size" ]]; then
             ERROR "${file_type}文件下载失败，请检查网络后重新运行脚本！"
@@ -440,6 +459,7 @@ function user_emby_fast() {
             exit 1
         fi
         
+        # 检测115网盘可用性
         if [[ $ok_115 =~ ^[Yy]$ ]]; then
             docker exec $docker_name ali_clear -1 > /dev/null 2>&1
             docker run --rm --net=host -v $image_dir:/image ailg/ggbond:latest \
@@ -455,12 +475,14 @@ function user_emby_fast() {
             use_115_path=false
         fi
         
+        # 使用通用下载函数下载媒体文件
         download_file_with_aria2c "$emby_ailg" "$image_dir" "media" "$remote_size"
         if [ $? -ne 0 ]; then
             ERROR "媒体文件下载失败！"
             exit 1
         fi
         
+        # 下载完成后获取本地文件大小
         local_size=$(du -b $image_dir/$emby_ailg | cut -f1)
     }
 
@@ -629,6 +651,7 @@ function user_emby_fast() {
     echo -e "\033[1;35m请输入镜像下载后需要扩容的空间（单位：GB，默认5G可直接回车，请确保大于${space_need_config}G剩余空间！）:\033[0m"
     read -r expand_size_config
     expand_size_config=${expand_size_config:-5}
+    # 先询问用户 115 网盘空间是否足够
     read -p "使用115下载镜像请确保cookie正常且网盘剩余空间不低于100G，（按Y/y 确认，按任意键走阿里云盘下载！）: " ok_115
     check_path $image_dir
     check_path $image_dir_config
@@ -660,6 +683,7 @@ function user_emby_fast() {
             get_emby_image
         fi
         init="run"
+        # emd_name="xiaoya-emd"
         emd_name="xy-emd"
         entrypoint_mount="entrypoint_emd"
         check_port "emby"
@@ -679,6 +703,7 @@ function user_emby_fast() {
     docker ps -a | grep 'ailg/xy-emd' | awk '{print $1}' | xargs -r docker stop
     if [ ${#emby_list[@]} -ne 0 ]; then
         for entry in "${emby_list[@]}"; do
+            # 提取各部分信息 - 适配新的数据结构
             op_emby=$(echo "$entry" | cut -d':' -f1)
             host_path=$(echo "$entry" | cut -d':' -f2)
             config_img_path=$(echo "$entry" | cut -d':' -f3)
@@ -687,13 +712,16 @@ function user_emby_fast() {
             INFO "${op_emby}容器已关闭！"
 
             if [[ "${host_path}" =~ .*\.img ]]; then
+                # 先清理无效的loop设备
                 cleanup_invalid_loops
                 
+                # 动态查找并清理媒体库相关的loop设备
                 media_loop=$(losetup -a | grep "${host_path}" | head -n1 | cut -d: -f1)
                 if [ -n "$media_loop" ]; then
                     mount | grep "${host_path%/*}/emby-xy" && umount "${host_path%/*}/emby-xy" && losetup -d "$media_loop"
                 fi
                 
+                # 检查并卸载配置路径挂载
                 if [ -n "$config_img_path" ]; then
                     config_loop=$(losetup -a | grep "${config_img_path}" | head -n1 | cut -d: -f1)
                     if [ -n "$config_loop" ]; then
@@ -754,6 +782,7 @@ function user_emby_fast() {
         [ "$local_size" -lt "$remote_size" ] && down_img
     fi
 
+    # 下载配置文件
     INFO "即将下载${emby_ailg_config}配置文件……"
     if [ ! -f $image_dir_config/$emby_img_config ]; then
         down_config_img
@@ -761,8 +790,10 @@ function user_emby_fast() {
             ERROR "配置文件下载失败！"
             exit 1
         fi
+        # 下载完成后重新获取本地文件大小
         local_config_size=$(du -b $image_dir_config/$emby_ailg_config | cut -f1)
     else
+        # 优先检查.mp4文件，如果不存在再检查.img文件
         if [ -f "$image_dir_config/$emby_ailg_config" ]; then
             local_config_size=$(du -b $image_dir_config/$emby_ailg_config | cut -f1)
         elif [ -f "$image_dir_config/$emby_img_config" ]; then
@@ -794,6 +825,7 @@ function user_emby_fast() {
         INFO "本地已有镜像，无需重新下载！"
     fi
 
+    # 处理配置文件镜像
     mount | grep $config_mount_dir && umount $config_mount_dir
     
     if [ -n "$local_config_size" ] && [ -n "$remote_config_size" ] && [ "$local_config_size" -eq "$remote_config_size" ]; then
@@ -824,18 +856,21 @@ function user_emby_fast() {
     if ! [[ -f /etc/nsswitch.conf ]]; then
         echo -e "hosts:\tfiles dns\nnetworks:\tfiles" > /etc/nsswitch.conf
     fi
+    #get_emby_image
     if [ ! -f "$image_dir/${init}" ]; then
         rm -rf "$image_dir/${init}"
-        curl -o "$image_dir/${init}" https://ailg.ggbond.org/${init}_v3
-        #docker cp "${docker_name}":/var/lib/${init} "$image_dir/"
+        docker cp "${docker_name}":/var/lib/${init} "$image_dir/"
         chmod 777 "$image_dir/${init}"
     fi
+    #if ${del_emby}; then
+        # 构建配置镜像挂载参数
         config_mount_params=""
         if [ -f "$image_dir_config/$emby_img_config" ]; then
             config_mount_params="-v $image_dir_config/$emby_img_config:/config.img"
         fi
 
         if [[ "${emby_image}" =~ emby ]]; then
+            # 构建ailg挂载参数
             ailg_mount_params="-v $image_dir:/ailg"
             if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
                 ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
@@ -853,6 +888,7 @@ function user_emby_fast() {
             echo "http://127.0.0.1:6908" > $config_dir/emby_server.txt
             fuck_cors "$emby_name"
         elif [[ "${emby_image}" =~ jellyfin/jellyfin ]]; then
+            # 构建ailg挂载参数
             ailg_mount_params="-v $image_dir:/ailg"
             if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
                 ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
@@ -875,6 +911,7 @@ function user_emby_fast() {
                 --privileged --add-host="xiaoya.host:127.0.0.1" --restart always $emby_image   
             echo "http://127.0.0.1:6910" > $config_dir/jellyfin_server.txt   
         else
+            # 构建ailg挂载参数
             ailg_mount_params="-v $image_dir:/ailg"
             if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
                 ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
@@ -924,6 +961,7 @@ function user_emby_fast() {
         INFO "正在为您安装小雅元数据爬虫同步……"
         docker rm -f xiaoya-emd &> /dev/null
         docker stop ${emd_name} &> /dev/null
+        # 根据架构选择镜像
         if [[ $(uname -m) == "armv7l" ]]; then
             emd_image="ailg/xy-emd:arm7-latest"
         else
@@ -1065,9 +1103,11 @@ img_uninstall() {
     read -erp "请输入：" clear_img
     [[ ! "${clear_img}" =~ ^[Nn]$ ]] && clear_img="y"
 
+    # declare -ga img_order
     img_order=()
     search_img="emby/embyserver|amilys/embyserver|nyanmisaka/jellyfin|jellyfin/jellyfin"
     check_qnap
+    # check_loop_support
     get_emby_status > /dev/null
     if [ ${#emby_list[@]} -ne 0 ]; then
         for entry in "${emby_list[@]}"; do
@@ -1110,14 +1150,17 @@ img_uninstall() {
                         fi
                     done
 
+                    # 从容器内获取loop设备号（容器停止前）
                     media_loop=""
                     config_loop=""
                     
+                    # 从/ailg/.loop获取媒体库和配置的loop设备号
                     if docker exec ${emby_name} test -f /ailg/.loop 2>/dev/null; then
                         media_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
                         config_loop=$(docker exec ${emby_name} grep "^config " /ailg/.loop 2>/dev/null | awk '{print $2}')
                     fi
 
+                    # 停止所有相关容器
                     for op_emby in "${img_order[@]}"; do
                         docker stop "${op_emby}"
                         INFO "${op_emby}容器已关闭！"
@@ -1127,6 +1170,7 @@ img_uninstall() {
                     docker ps -a | grep 'ailg/xy-emd' | awk '{print $1}' | xargs -r docker rm -f
                     INFO "小雅爬虫容器已删除！"
 
+                    # 使用获取到的loop设备号进行清理
                     if [ -n "$media_loop" ]; then
                         umount -l "$media_loop" > /dev/null 2>&1
                         losetup -d "$media_loop" > /dev/null 2>&1
@@ -1137,6 +1181,7 @@ img_uninstall() {
                         losetup -d "$config_loop" > /dev/null 2>&1
                     fi
                     
+                    # 卸载可能的挂载目录
                     media_mount=${media_path%/*.img}/emby-xy
                     config_mount=${config_img_path%/*.img}/emby-xy-config
                     mount | grep -qF "${media_mount}" && umount "${media_mount}"
@@ -1145,11 +1190,13 @@ img_uninstall() {
                     docker rm ${emby_name}
 
                     if [[ "${clear_img}" =~ ^[Yy]$ ]]; then
+                        # 删除media镜像
                         if [[ -f "${media_path}" ]]; then
                             rm -f "${media_path}"
                             INFO "已删除媒体库镜像：${Yellow}${media_path}${NC}"
                         fi
                         
+                        # 删除config镜像
                         if [[ -f "${config_img_path}" ]]; then
                             rm -f "${config_img_path}"
                             INFO "已删除config配置镜像：${Yellow}${config_img_path}${NC}"
@@ -1205,9 +1252,11 @@ img_uninstall() {
 }
 
 happy_emby() {
+    # declare -ga img_order
     img_order=()
     search_img="emby/embyserver|amilys/embyserver|nyanmisaka/jellyfin|jellyfin/jellyfin"
     check_qnap
+    # check_loop_support
     get_emby_status > /dev/null
     if [ ${#emby_list[@]} -ne 0 ]; then
         for entry in "${emby_list[@]}"; do
@@ -1233,6 +1282,7 @@ happy_emby() {
                         break
                     fi
                 done
+                # 分离媒体库和config镜像路径显示
                 if [ -n "$config_img_path" ]; then
                     printf "[ %-1d ] 容器名: \033[1;33m%-20s\033[0m 媒体库路径: \033[1;33m%s\033[0m config镜像路径: \033[1;33m%s\033[0m\n" $((index + 1)) $name $media_path $config_img_path
                 else
@@ -1254,9 +1304,11 @@ happy_emby() {
                         fi
                     done
 
+                    # 获取当前emby容器使用的镜像版本
                     current_image=$(docker inspect --format '{{.Config.Image}}' "${happy_name}")
                     current_version=$(echo "$current_image" | awk -F':' '{print $NF}')
                     
+                    # 如果无法获取版本号，让用户手动输入
                     if [[ -z "$current_version" ]]; then
                         echo -e "\033[1;33m无法自动获取emby版本号，请手动输入版本号。\033[0m"
                         echo -e "常见版本号示例："
@@ -1272,6 +1324,7 @@ happy_emby() {
                         done
                     fi
                     
+                    # 获取开心版镜像
                     get_emby_happy_image "$current_version"
 
                     docker rm -f "${happy_name}"
@@ -1282,11 +1335,13 @@ happy_emby() {
                         echo -e "hosts:\tfiles dns\nnetworks:\tfiles" > /etc/nsswitch.conf
                     fi
                     
+                    # 构建配置镜像挂载参数
                     config_mount_params=""
                     if [ -n "$happy_config_path" ] && [ -f "$happy_config_path" ]; then
                         config_mount_params="-v $happy_config_path:/config.img"
                     fi
                     
+                    # 构建ailg挂载参数
                     happy_img_dir=$(dirname "$happy_path")
                     happy_config_dir=$(dirname "$happy_config_path")
                     ailg_mount_params="-v $happy_img_dir:/ailg"
@@ -1331,6 +1386,8 @@ get_img_path() {
     case "${img_name}" in
     "emby-ailg-115.img" | "emby-ailg-lite-115.img" | "jellyfin-ailg.img" | "jellyfin-ailg-lite.img" | "jellyfin-10.9.6-ailg-lite.img" | "jellyfin-10.9.6-ailg.img") ;;
     "emby-ailg-115-4.9.img" | "emby-ailg-lite-115-4.9.img") ;;
+    # "emby-ailg-115.mp4" | "emby-ailg-lite-115.mp4" | "jellyfin-ailg.mp4" | "jellyfin-ailg-lite.mp4" | "jellyfin-10.9.6-ailg-lite.mp4" | "jellyfin-10.9.6-ailg.mp4") ;;
+    # "emby-ailg-115-4.9.mp4" | "emby-ailg-lite-115-4.9.mp4")
     "emby-ailg-115.mp4" | "emby-ailg-lite-115.mp4" | "jellyfin-ailg.mp4" | "jellyfin-ailg-lite.mp4" | "jellyfin-10.9.6-ailg-lite.mp4" | "jellyfin-10.9.6-ailg.mp4" | "emby-ailg-115-4.9.mp4" | "emby-ailg-lite-115-4.9.mp4")
         img_path="${img_path%.mp4}.img"
         ;;
@@ -1342,18 +1399,21 @@ get_img_path() {
         ;;
     esac
     
+    # 根据镜像类型设置不同的挂载点
     if [[ "$img_type" == "config" ]]; then
         img_mount=${img_path%/*.img}/emby-xy-config
     else
         img_mount=${img_path%/*.img}/emby-xy
     fi
     
+    # read -p "$(echo img_mount is: $img_mount)"
     check_path ${img_mount}
 }
 
 stop_related_containers() {
     local img_file="$1"
     
+    # 检查是否是.img文件
     if [[ "$img_file" != *.img ]]; then
         return 0
     fi
@@ -1361,15 +1421,18 @@ stop_related_containers() {
     INFO "检查与镜像 $img_file 相关的容器..."
     local found_container=false
     
+    # 查找使用指定镜像的容器 - 分别查询两种镜像
     local container_ids_1=$(docker ps -a --format '{{.ID}}' --filter "ancestor=ailg/xy-emd:latest" 2>/dev/null || echo "")
     local container_ids_2=$(docker ps -a --format '{{.ID}}' --filter "ancestor=ddsderek/xiaoya-emd:latest" 2>/dev/null || echo "")
     local container_ids="$container_ids_1 $container_ids_2"
     
     for container_id in $container_ids; do
+        # 跳过空行
         if [ -z "$container_id" ]; then
             continue
         fi
         
+        # 检查容器的挂载路径是否包含所选镜像
         if docker inspect --format '{{ range .Mounts }}{{ println .Source }}{{ end }}' "$container_id" 2>/dev/null | grep -q "$img_file"; then
             local container_name=$(docker ps -a --format '{{.Names}}' --filter "id=$container_id" 2>/dev/null)
             INFO "找到使用镜像 $img_file 的容器: $container_name，正在停止..."
@@ -1390,6 +1453,7 @@ stop_related_containers() {
     return 0
 }
 
+# 智能挂载img文件
 smart_mount_img() {
     local img_path="$1"
     local mount_point="$2"
@@ -1401,12 +1465,15 @@ smart_mount_img() {
     
     INFO "开始智能挂载: $img_path -> $mount_point"
     
+    # 确保挂载点目录存在
     mkdir -p "$mount_point"
     
+    # 使用智能loop设备绑定
     local loop_device
     if loop_device=$(smart_bind_loop_device "$img_path"); then
         INFO "成功获取loop设备: $loop_device"
         
+        # 尝试挂载
         if mount "$loop_device" "$mount_point"; then
             INFO "成功挂载: $loop_device -> $mount_point"
             return 0
@@ -1423,9 +1490,11 @@ smart_mount_img() {
 mount_img() {
     mount_type=""
     
+    # 如果传入了参数，直接使用
     if [ -n "$1" ]; then
         mount_type="$1"
     else
+        # 没有传入参数，询问用户选择
         echo -e "\n\033[1;36m=== 镜像挂载类型选择 ===\033[0m"
         echo -e "请选择要挂载的镜像类型："
         echo -e "\033[32m1. media   - 媒体库镜像（默认）\033[0m"
@@ -1453,25 +1522,31 @@ mount_img() {
         done
     fi
     
+    # declare -ga img_order
     img_order=()
     search_img="emby/embyserver|amilys/embyserver|nyanmisaka/jellyfin|jellyfin/jellyfin"
     check_qnap
+    # check_loop_support
     get_emby_status > /dev/null
+    # update_ailg ailg/ggbond:latest
     if [ ! -f /usr/bin/mount_ailg ]; then
         docker cp g-box:/var/lib/mount_ailg "/usr/bin/mount_ailg"
         chmod 777 /usr/bin/mount_ailg
     fi
     if [ ${#emby_list[@]} -ne 0 ]; then
         for entry in "${emby_list[@]}"; do
+            # 提取各部分信息 - 适配新的数据结构
             op_emby=$(echo "$entry" | cut -d':' -f1)
             host_path=$(echo "$entry" | cut -d':' -f2)
             config_img_path=$(echo "$entry" | cut -d':' -f3)
 
             if [[ "$mount_type" == "media" ]]; then
+                # 媒体库模式：查找挂载到/media.img的容器
                 if docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' "${op_emby}" | grep -qE "\.img /media\.img"; then
                     img_order+=("${op_emby}")
                 fi
             elif [[ "$mount_type" == "config" ]]; then
+                # 配置模式：查找挂载到/config.img的容器
                 if docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' "${op_emby}" | grep -qE "\.img /config\.img"; then
                     img_order+=("${op_emby}")
                 fi
@@ -1522,13 +1597,20 @@ mount_img() {
                         fi
                     done
                     
+                    # 根据挂载类型设置挂载目录
                     if [[ "$mount_type" == "media" ]]; then
                         img_mount=${img_path%/*.img}/emby-xy
                     else
                         img_mount=${img_path%/*.img}/emby-xy-config
                     fi
 
+                    # for op_emby in "${img_order[@]}"; do
+                    #     docker stop "${op_emby}"
+                    #     INFO "${op_emby}容器已关闭！"
+                    # done
+                    # 从容器内获取loop设备号（容器停止前）
                     img_loop=""
+                    # 从/ailg/.loop获取对应类型的loop设备
                     if docker exec ${emby_name} test -f /ailg/.loop 2>/dev/null; then
                         if [[ "$mount_type" == "media" ]]; then
                             img_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
@@ -1540,8 +1622,12 @@ mount_img() {
                     docker stop ${emby_name}
                     stop_related_containers "${img_path}"
 
+                    # docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
+                    # INFO "小雅爬虫容器已关闭！"
+                    # 先清理无效的loop设备
                     cleanup_invalid_loops
                     
+                    # 动态清理可能存在的loop设备
                     if [ -n "$img_loop" ]; then
                         umount -l "$img_loop" > /dev/null 2>&1
                         losetup -d "$img_loop" > /dev/null 2>&1
@@ -1566,6 +1652,7 @@ mount_img() {
                         fi
                     fi
 
+                    # 从/ailg/.loop获取对应类型的loop设备
                     if [[ "$mount_type" == "media" ]]; then
                         img_loop=$(docker exec ${emby_name} grep "^media " /ailg/.loop 2>/dev/null | awk '{print $2}')
                     else
@@ -1580,6 +1667,7 @@ mount_img() {
                     fi
                     break
                 elif [ "${img_select}" -eq 0 ]; then
+                    # 手动输入路径
                     get_img_path "$mount_type"
                     
                     if smart_mount_img "${img_path}" "${img_mount}"; then
@@ -1594,6 +1682,7 @@ mount_img() {
                 fi
             done
         else
+            # 没有找到相应的容器，提示手动输入
             echo -e "\033[1;33m未找到挂载img镜像的容器，请手动输入路径：\033[0m"
 
             get_img_path "$mount_type"
@@ -1607,6 +1696,7 @@ mount_img() {
             fi
         fi
     else
+        # 没有找到任何容器
         echo -e "\033[1;33m未找到挂载img镜像的容器，请手动输入路径：\033[0m"
 
         get_img_path "$mount_type"
@@ -1621,15 +1711,19 @@ mount_img() {
 }
 
 expand_img() {
+    # declare -ga img_order
     img_order=()
     search_img="emby/embyserver|amilys/embyserver|nyanmisaka/jellyfin|jellyfin/jellyfin"
     check_qnap
+    # check_loop_support
     get_emby_status > /dev/null
+    # update_ailg ailg/ggbond:latest
     if [ ! -f /usr/bin/mount_ailg ]; then
         docker cp g-box:/var/lib/mount_ailg "/usr/bin/mount_ailg"
         chmod 777 /usr/bin/mount_ailg
     fi
     
+    # 先询问用户要扩容的镜像类型
     local expand_type=""
     echo -e "\n\033[1;36m=== 镜像扩容类型选择 ===\033[0m"
     echo -e "请选择要扩容的镜像类型："
@@ -1656,16 +1750,19 @@ expand_img() {
     done
     
     if [ ${#emby_list[@]} -ne 0 ]; then
+        # 根据选择的类型构建可扩容的镜像列表
         for entry in "${emby_list[@]}"; do
             op_emby=$(echo "$entry" | cut -d':' -f1)
             media_path=$(echo "$entry" | cut -d':' -f2)
             config_img_path=$(echo "$entry" | cut -d':' -f3)
             
             if [[ "$expand_type" == "media" ]]; then
+                # 检查是否有media.img
                 if [[ "$media_path" == *.img ]] && docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' "${op_emby}" | grep -qE "\.img /media\.img"; then
                     img_order+=("${op_emby}:${media_path}")
                 fi
             else
+                # 检查是否有config.img
                 if [[ -n "$config_img_path" && "$config_img_path" == *.img ]] && docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' "${op_emby}" | grep -qE "\.img /config\.img"; then
                     img_order+=("${op_emby}:${config_img_path}")
                 fi
@@ -1700,10 +1797,13 @@ expand_img() {
                     expand_diy_img_path "$expand_type"
                     break
                 elif [ "${img_select}" -eq 0 ]; then
+                    # 手动输入路径
                     get_img_path "$expand_type"
                     expand_diy_img_path "$expand_type"
+                    # 先清理无效的loop设备
                     cleanup_invalid_loops
                     
+                    # 动态清理可能存在的loop设备
                     img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
                     [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
                     break
@@ -1715,8 +1815,10 @@ expand_img() {
             ERROR "未找到可扩容的${expand_type}镜像，请手动输入路径"
             get_img_path "$expand_type"
             expand_diy_img_path "$expand_type"
+            # 先清理无效的loop设备
             cleanup_invalid_loops
             
+            # 动态清理可能存在的loop设备
             img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
             [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
         fi
@@ -1727,8 +1829,10 @@ expand_img() {
         expand_size=${expand_size:-50}
         get_img_path "$expand_type"
         expand_diy_img_path "$expand_type"
+        # 先清理无效的loop设备
         cleanup_invalid_loops
         
+        # 动态清理可能存在的loop设备
         img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
         [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
     fi
@@ -1749,6 +1853,7 @@ expand_diy_img_path() {
     docker ps -a | grep 'ailg/xy-emd' | awk '{print $1}' | xargs -r docker stop
     INFO "小雅爬虫容器已关闭！"
 
+    # 使用智能loop设备管理清理
     INFO "清理镜像相关的loop设备: ${img_path}"
     cleanup_invalid_loops
     img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
@@ -1761,6 +1866,7 @@ expand_diy_img_path() {
     docker run -i --privileged --rm --net=host -v ${image_dir}:/ailg -v ${img_mount}:/mount_emby ailg/ggbond:latest \
         exp_ailg "/ailg/$emby_img" "/mount_emby" ${expand_size}
     
+    # 根据镜像类型显示不同的完成信息
     if [[ "$img_type" == "config" ]]; then
         [ $? -eq 0 ] && INFO "配置镜像扩容完成！" || WARN "配置镜像扩容失败，请检查日志！"
     else
@@ -1777,6 +1883,7 @@ sync_config() {
     umask 000
     [ -z "${config_dir}" ] && get_config_path
     mount_img "config" || exit 1
+    #docker stop ${emby_name}
     if [ "${img_select}" -eq 0 ]; then
         get_emby_image
     else
@@ -1857,6 +1964,10 @@ sync_config() {
             exit 1
         fi
 
+        #rm -rf ${img_mount}/config/cache/* ${img_mount}/config/metadata/* ${img_mount}/config/data/library.db*
+        #7z x -aoa -bb1 -mmt=16 /media/temp/config.mp4 -o/media/config/data/ config/data/library.db*
+        #7z x -aoa -bb1 -mmt=16 /media/temp/config.mp4 -o/media/config/cache/ config/cache/*
+        #7z x -aoa -bb1 -mmt=16 /media/temp/config.mp4 -o/media/config/metadata/ config/metadata/*
         if ! "${run_7z}"; then
             echo -e "\033[1;33m远程小雅config未更新，与本地数据一样，是否重新解压本地config.mp4？${NC}"
             answer=""
@@ -1891,6 +2002,12 @@ sync_config() {
     elif [[ "$sync_select" == "2" ]]; then
         ! docker ps | grep -q "${emby_name}" && ERROR "${emby_name}未正常启动，如果数据库已损坏请重新运行脚本，选择干净安装！" && exit 1
         xiaoya_host="127.0.0.1"
+        # docker run -d --name emby-sync -v /etc/nsswitch.conf:/etc/nsswitch.conf \
+        # -v ${img_mount}/xiaoya:/media \
+        # -v ${img_mount}/config:/config \
+        # --user 0:0 \
+        # --net=host \
+        # --privileged --add-host="xiaoya.host:$xiaoya_host" --restart always $emby_image
         echo -e "\n"
         echo -e "\033[1;31m同步进行中，需要较长时间，请耐心等待，直到出命令行提示符才算结束！\033[0m"
         [ -f "/tmp/sync_emby_config_ailg.sh" ] && rm -f /tmp/sync_emby_config_ailg.sh
@@ -1981,28 +2098,36 @@ function legacy_emby_rebuild() {
     echo -e "\033[1;33m将使用旧版单loop设备方式重新构建Emby容器\033[0m"
     echo -e "\n"
     
+    # 1. 获取用户要用来创建emby的媒体库img镜像路径
     get_legacy_img_path
     
+    # 2. 停止和删除当前已创建的emby和爬虫容器
     stop_and_remove_containers
     
+    # 3. 删除img所在目录的run文件，下载旧版run文件
     download_legacy_run_file
     
+    # 4. 用旧版的docker模板创建emby容器
     create_legacy_emby_container
     
+    # 5. 用旧版的爬虫命令创建爬虫容器
     create_legacy_crawler_container
     
     INFO "${Green}向下兼容小雅速装Emby重建完成！${NC}"
 }
 
 get_legacy_img_path() {
+    # 检测当前环境中已安装的img挂载的emby
     img_order=()
     search_img="emby/embyserver|amilys/embyserver|nyanmisaka/jellyfin|jellyfin/jellyfin"
     get_emby_status > /dev/null
     
+    # 填充img_order数组
     if [ ${#emby_list[@]} -ne 0 ]; then
         for entry in "${emby_list[@]}"; do
             op_emby=${entry%%:*}
             host_path=${entry#*:}
+            # 检查是否是img挂载的容器
             if docker inspect --format '{{ range .Mounts }}{{ println .Source .Destination }}{{ end }}' "${op_emby}" | grep -qE "\.img /media\.img"; then
                 img_order+=("${op_emby}")
             fi
@@ -2020,6 +2145,7 @@ get_legacy_img_path() {
                     break
                 fi
             done
+            # 分离媒体库和config镜像路径
             media_path=""
             config_path=""
             if [[ "$host_path" == *":"* ]]; then
@@ -2039,6 +2165,7 @@ get_legacy_img_path() {
                 legacy_img_path=""
                 for entry in "${emby_list[@]}"; do
                     if [[ $entry == $legacy_emby_name:* ]]; then
+                        # 提取媒体库路径（第二个字段）
                         legacy_img_path=$(echo "$entry" | cut -d':' -f2)
                         break
                     fi
@@ -2055,6 +2182,7 @@ get_legacy_img_path() {
         get_manual_img_path
     fi
     
+    # 验证镜像文件
     if [[ ! -f "$legacy_img_path" ]]; then
         ERROR "镜像文件不存在：$legacy_img_path"
         exit 1
@@ -2083,6 +2211,7 @@ get_manual_img_path() {
         ;;
     esac
     
+    # 手动输入路径时，清空容器相关变量，使用默认值
     legacy_emby_name=""
     legacy_container_name=""
     legacy_container_image=""
@@ -2091,9 +2220,11 @@ get_manual_img_path() {
 stop_and_remove_containers() {
     INFO "正在停止和删除相关容器..."
     
+    # 停止和删除emby容器，并保存容器信息用于重建
     if [ -n "$legacy_emby_name" ]; then
         INFO "停止容器：$legacy_emby_name"
         
+        # 获取容器的镜像信息，用于后续重建
         legacy_container_image=$(docker inspect --format '{{.Config.Image}}' "$legacy_emby_name" 2>/dev/null)
         if [ -n "$legacy_container_image" ]; then
             INFO "保存容器镜像信息：$legacy_container_image"
@@ -2101,14 +2232,17 @@ stop_and_remove_containers() {
             WARN "无法获取容器 $legacy_emby_name 的镜像信息，将使用默认镜像"
         fi
         
+        # 保存容器名用于重建
         legacy_container_name="$legacy_emby_name"
         
         docker stop "$legacy_emby_name" > /dev/null 2>&1
         docker rm "$legacy_emby_name" > /dev/null 2>&1
         INFO "容器 $legacy_emby_name 已删除"
     else
+        # 手动输入路径时，清理可能存在的默认容器名
         INFO "清理可能存在的默认容器..."
         
+        # 检查并清理emby容器
         if docker ps -a --format '{{.Names}}' | grep -q "^emby$"; then
             INFO "发现emby容器，正在删除..."
             docker stop emby > /dev/null 2>&1
@@ -2116,6 +2250,7 @@ stop_and_remove_containers() {
             INFO "emby容器已删除"
         fi
         
+        # 检查并清理jellyfin_xy容器
         if docker ps -a --format '{{.Names}}' | grep -q "^jellyfin_xy$"; then
             INFO "发现jellyfin_xy容器，正在删除..."
             docker stop jellyfin_xy > /dev/null 2>&1
@@ -2124,6 +2259,7 @@ stop_and_remove_containers() {
         fi
     fi
     
+    # 停止和删除爬虫容器
     INFO "停止爬虫容器..."
     docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker rm -f > /dev/null 2>&1
     docker ps -a | grep 'ailg/xy-emd' | awk '{print $1}' | xargs -r docker rm -f > /dev/null 2>&1
@@ -2134,6 +2270,7 @@ download_legacy_run_file() {
     INFO "正在下载新版run文件（支持动态loop设备）..."
     
     if [[ "$legacy_img_name" == *"jellyfin"* ]]; then
+        # 下载Jellyfin的run_jf文件
         if [ -f "$legacy_img_dir/run_jf" ]; then
             rm -f "$legacy_img_dir/run_jf"
             INFO "已删除现有的run_jf文件"
@@ -2153,6 +2290,7 @@ download_legacy_run_file() {
             fi
         done
     else
+        # 下载Emby的run文件
         if [ -f "$legacy_img_dir/run" ]; then
             rm -f "$legacy_img_dir/run"
             INFO "已删除现有的run文件"
@@ -2177,6 +2315,7 @@ download_legacy_run_file() {
 create_legacy_emby_container() {
     INFO "正在创建旧版Emby容器..."
     
+    # 使用保存的容器名称，如果没有则使用默认名称
     if [ -z "$legacy_container_name" ]; then
         if [[ "$legacy_img_name" == *"jellyfin"* ]]; then
             legacy_container_name="jellyfin_xy"
@@ -2188,10 +2327,13 @@ create_legacy_emby_container() {
         INFO "使用原容器名称：$legacy_container_name"
     fi
     
+    # 确定镜像类型和版本
     if [ -n "$legacy_container_image" ]; then
+        # 使用保存的原容器镜像
         emby_image="$legacy_container_image"
         INFO "使用原容器镜像：$emby_image"
     else
+        # 如果没有保存的镜像信息，则根据文件名推断
         WARN "未找到原容器镜像信息，根据文件名推断镜像类型"
         if [[ "$legacy_img_name" == *"jellyfin"* ]]; then
             if [[ "$legacy_img_name" == *"10.9.6"* ]]; then
@@ -2208,19 +2350,24 @@ create_legacy_emby_container() {
         fi
     fi
     
+    # 获取本地IP
     if command -v ifconfig > /dev/null 2>&1; then
         localip=$(ifconfig -a|grep inet|grep -v 172.17 | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1)
     else
         localip=$(ip address|grep inet|grep -v 172.17 | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1|cut -f1 -d"/")
     fi
     
+    # 确保nsswitch.conf存在
     if ! [[ -f /etc/nsswitch.conf ]]; then
         echo -e "hosts:\tfiles dns\nnetworks:\tfiles" > /etc/nsswitch.conf
     fi
     
+    # 创建旧版Emby容器（使用新版动态loop设备获取）
+    # 构建ailg挂载参数
     ailg_mount_params="-v $legacy_img_dir:/ailg"
     
     if [[ "$emby_image" == *"jellyfin"* ]]; then
+        # Jellyfin容器
         docker run -d --name "$legacy_container_name" -v /etc/nsswitch.conf:/etc/nsswitch.conf \
             -v "$legacy_img_path":/media.img \
             $ailg_mount_params \
@@ -2236,6 +2383,7 @@ create_legacy_emby_container() {
             --net=host \
             --privileged --add-host="xiaoya.host:$localip" --restart always "$emby_image"
     else
+        # Emby容器
         docker run -d --name "$legacy_container_name" -v /etc/nsswitch.conf:/etc/nsswitch.conf \
             -v "$legacy_img_path":/media.img \
             $ailg_mount_params \
@@ -2246,6 +2394,7 @@ create_legacy_emby_container() {
             --privileged --add-host="xiaoya.host:$localip" --restart always "$emby_image"
     fi
     
+    # 检查容器是否成功启动
     sleep 5
     if docker ps --format '{{.Names}}' | grep -q "^${legacy_container_name}$"; then
         INFO "${Green}旧版Emby容器创建成功！${NC}"
@@ -2255,6 +2404,7 @@ create_legacy_emby_container() {
         else
             INFO "Emby本地访问地址：${Blue}http://$localip:6908${NC}"
             INFO "Emby代理访问地址：${Blue}http://$localip:2345${NC}"
+            # 应用CORS修复
             fuck_cors "$legacy_container_name"
         fi
     else
@@ -2267,8 +2417,10 @@ create_legacy_emby_container() {
 create_legacy_crawler_container() {
     INFO "正在创建旧版爬虫容器..."
     
+    # 设置xy_emby_sync需要的变量
     mount_path="$legacy_img_path"
     
+    # 根据镜像类型设置container_mode变量，避免用户交互
     if [[ "$legacy_img_name" == *"jellyfin"* ]]; then
         container_mode="jellyfin"
         INFO "使用Jellyfin模式创建爬虫容器"
@@ -2277,6 +2429,7 @@ create_legacy_crawler_container() {
         INFO "使用Emby模式创建爬虫容器"
     fi
     
+    # 调用现有的爬虫安装函数
     xy_emby_sync
     
     if [ $? -eq 0 ]; then
@@ -2407,6 +2560,7 @@ function docker_image_download() {
         
         read -erp "请选择要下载的镜像（1-8）：" image_choice
 
+        # 根据选择确定镜像文件名
         case $image_choice in
             1) image_file="ailg.gbox.hostmode.${arch}.tar.gz" ; break ;;
             2) image_file="ailg.ggbond.latest.${arch}.tar.gz" ; break ;;
@@ -2420,13 +2574,16 @@ function docker_image_download() {
         esac
     done
     
+    # 获取下载目录
     read -erp "请输入保存镜像的目录路径：" save_dir
     check_path "$save_dir"
     
+    # 下载镜像文件
     download_url="${base_url}/d/AI老G常用分享（夸克）/gbox常用镜像/${image_file}"
     
     if docker images | grep -q "ailg/ggbond" && [[ ! $image_file == *"ggbond"* ]]; then
         INFO "使用ailg/ggbond容器下载镜像..."
+        # 添加文件大小检查
         docker run --rm \
             -v "${save_dir}:/ailg" \
             ailg/ggbond:latest \
@@ -2448,6 +2605,7 @@ function docker_image_download() {
             return 1
         fi
 
+        # 验证下载的文件
         if [[ ! -f "${save_dir}/${image_file}" ]] || \
            [[ $(stat -c%s "${save_dir}/${image_file}") -lt 1000000 ]] || \
            ! gunzip -t "${save_dir}/${image_file}" 2>/dev/null; then
@@ -2818,6 +2976,7 @@ function user_gbox() {
     fi
     check_port "g-box"
     
+    #获取安装路径
     if [[ -n "$config_dir" ]]; then
         INFO "你原来G-Box/小雅alist/tvbox的配置路径是：${Blue}${config_dir}${NC}，可使用原有配置继续安装！"
         read -erp "确认请按任意键，或者按N/n手动输入路径：" user_select_0
@@ -2833,11 +2992,13 @@ function user_gbox() {
         check_path $config_dir
         INFO "G-Box配置路径为：$config_dir"
     fi
+    # 检查旧的g-box配置文件
     if [[ -f "${config_dir}/atv.mv.db" ]]; then
         INFO "${Yellow}检测到旧的g-box配置文件！${NC}"
         read -erp "是否使用旧配置数据安装？（默认使用，按N/n清除旧配置）：" use_old_config
         if [[ ${use_old_config} == [Nn] ]]; then
             INFO "${Red}正在清除旧的g-box配置数据...${NC}"
+            # 删除 atv. 开头的文件
             find "${config_dir}" -maxdepth 1 -type f -name "atv.*" -exec rm -f {} \;
             rm -rf "${config_dir:?}"/{atv,conf,log,index,tvbox} \
                    "${config_dir:?}"/{mounts.bind,alisturl.txt,jellyfinurl.txt,embyurl.txt,sunpanelurl.txt,sun-panel.txt,115share_list.txt,pikpakshare_list.txt,quarkshare_list.txt} > /dev/null 2>&1
@@ -2890,9 +3051,11 @@ function user_gbox() {
         fi
     fi
 
+    # 询问用户是否使用内置的sun-panel导航
     echo -e "\033[1;33m是否使用内置的sun-panel导航？\033[0m"
     read -erp "请选择：（使用-按Y/y键，不使用-按N/n键，默认使用）" use_sun_panel
 
+    # 如果用户选择不使用，写入配置文件
     if [[ $use_sun_panel == [Nn] ]]; then
         echo "uninstall" > "$config_dir/sun-panel.txt"
         INFO "已设置不使用内置的sun-panel导航"
@@ -2932,6 +3095,7 @@ function user_gbox() {
 
 
 
+#删除原来的小雅容器
 rm_alist() {
     for container in $(docker ps -aq); do
         image=$(docker inspect --format '{{.Config.Image}}' "$container")
@@ -2939,6 +3103,7 @@ rm_alist() {
             WARN "本安装会删除原有的小雅alist容器，按任意键继续，或按CTRL+C退出！"
             read -r -n 1
             echo "Deleting container $container using image $image ..."
+            # config_dir=$(docker inspect --format '{{ (index .Mounts 0).Source }}' "$container")
             config_dir=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' "$container")
             docker stop "$container"
             docker rm "$container"
@@ -3120,6 +3285,7 @@ temp_gbox() {
     docker_name="$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)" 
     docker_name="${docker_name:-g-box}"
 
+    # 获取GB版本号并提取日期值作为tag
     local gb_version=""
     if [ -n "$1 " ]; then
         gb_version_tag="$1"

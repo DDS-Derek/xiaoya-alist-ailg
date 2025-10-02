@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 function xy_emby_sync() {
     
@@ -15,25 +15,20 @@ function xy_emby_sync() {
         "📺画质演示测试（4K，8K，HDR，Dolby）/"
     )
 
-    # Define the directories included in the "Default" selection
     declare -a DEFAULT_DIRS=(
         "每日更新/"
         "纪录片（已刮削）/"
     )
 
-    # 使用普通数组替代关联数组，通过索引和值的命名约定实现键值存储
     declare -a status_keys
     declare -a status_values
 
-    # Variables to store user choices for interval and rebuild
     sync_interval=""
     rebuild_db_flag=false # Use boolean flag internally
     cron_env_var=""
     rebuild_env_var=""
 
-    # --- Functions ---
 
-    # 查找键在数组中的索引
     find_key_index() {
         local search_key="$1"
         local i=0
@@ -50,7 +45,6 @@ function xy_emby_sync() {
         return 1
     }
 
-    # Get selection status for a key (directory name, "Default", or "All")
     get_status() {
         local key="$1"
         local index=$(find_key_index "$key")
@@ -62,25 +56,20 @@ function xy_emby_sync() {
         fi
     }
 
-    # Set selection status for a key
     set_status() {
         local key="$1"
         local value="$2"
         local index=$(find_key_index "$key")
         
         if [[ $index -ge 0 ]]; then
-            # 键已存在，更新值
             status_values[$index]=$value
         else
-            # 键不存在，添加新键值对
             status_keys+=("$key")
             status_values+=("$value")
         fi
     }
 
-    # Initialize selection status
     initialize_status() {
-        # 初始化数组
         status_keys=()
         status_values=()
         
@@ -90,17 +79,13 @@ function xy_emby_sync() {
         set_status "Default" 0
         set_status "All" 0
 
-        # Set initial state to Default
         select_default
     }
 
-    # Select only the default directories
     select_default() {
-        # Deselect all first
         for dir in "${DIRS[@]}"; do
             set_status "$dir" 0
         done
-        # Select default ones
         for dir in "${DEFAULT_DIRS[@]}"; do
             set_status "$dir" 1
         done
@@ -108,7 +93,6 @@ function xy_emby_sync() {
         set_status "All" 0
     }
 
-    # Select all directories
     select_all() {
         for dir in "${DIRS[@]}"; do
             set_status "$dir" 1
@@ -117,7 +101,6 @@ function xy_emby_sync() {
         set_status "All" 1
     }
 
-    # Deselect all directories
     deselect_all() {
         for dir in "${DIRS[@]}"; do
             set_status "$dir" 0
@@ -126,13 +109,11 @@ function xy_emby_sync() {
         set_status "All" 0
     }
 
-    # Update the status of "Default" and "All" based on individual selections
     update_special_statuses() {
         local all_selected=1
         local default_match=1
         local has_selection=0
 
-        # Check if all individual directories are selected
         for dir in "${DIRS[@]}"; do
             if [[ $(get_status "$dir") -eq 0 ]]; then
                 all_selected=0
@@ -141,13 +122,11 @@ function xy_emby_sync() {
             fi
         done
 
-        # Check if the current selection exactly matches the default set
         if [[ $has_selection -eq 0 ]]; then # If nothing is selected
             default_match=0
         else
             for dir in "${DIRS[@]}"; do
                 local is_default=0
-                # Check if this dir is in the default list
                 for default_dir in "${DEFAULT_DIRS[@]}"; do
                     if [[ "$dir" == "$default_dir" ]]; then
                         is_default=1
@@ -157,7 +136,6 @@ function xy_emby_sync() {
 
                 local current_status=$(get_status "$dir")
 
-                # If it's a default dir but not selected, or if it's not a default dir but IS selected
                 if ( [[ $is_default -eq 1 ]] && [[ $current_status -eq 0 ]] ) || \
                 ( [[ $is_default -eq 0 ]] && [[ $current_status -eq 1 ]] ); then
                     default_match=0
@@ -166,12 +144,10 @@ function xy_emby_sync() {
             done
         fi
 
-        # Update the 'All' and 'Default' statuses
         set_status "All" $all_selected
         set_status "Default" $default_match
     }
 
-    # Display the selection menu
     show_menu() {
         clear
         echo "请选择您需要同步的目录："
@@ -183,13 +159,11 @@ function xy_emby_sync() {
             if [[ $(get_status "$dir") -eq 1 ]]; then
                 status_char="✓"
             fi
-            # Format index to be two digits for alignment if needed (optional)
             printf "\033[32m%2d) [%s] %s\033[0m\n" "$index" "$status_char" "$dir"
             i=$((i + 1))
         done
 
         echo "---------------------------------------------"
-        # Special options
         local default_index=$(( ${#DIRS[@]} + 1 ))
         local all_index=$(( ${#DIRS[@]} + 2 ))
         local status_char_def=" "
@@ -207,18 +181,15 @@ function xy_emby_sync() {
         echo -e "\033[33m提示: 输入数字 (如 1, 3, ${default_index}) 切换选中状态，可输入多个 (用逗号分隔), 输入 0 确认.\033[0m"
     }
 
-    # Process user's selection input
     process_selection() {
         local input="$1"
         local default_index=$(( ${#DIRS[@]} + 1 ))
         local all_index=$(( ${#DIRS[@]} + 2 ))
         local individual_toggled=0
 
-        # Split comma-separated input into an array
         IFS=',' read -ra CHOICES <<< "$input"
 
         for choice in "${CHOICES[@]}"; do
-            # Trim whitespace
             choice=$(echo "$choice" | xargs)
 
             if [[ ! "$choice" =~ ^[0-9]+$ ]]; then
@@ -229,18 +200,15 @@ function xy_emby_sync() {
                 continue
             fi
 
-            # Process numeric choices
             case $choice in
                 0) # Confirm
                     return 1 # Signal to exit the loop
                     ;;
                 *) # Directory, Default, or All
                     if [[ $choice -ge 1 && $choice -le ${#DIRS[@]} ]]; then
-                        # It's a directory selection
                         local dir_index=$((choice - 1))
                         local dir_name="${DIRS[$dir_index]}"
                         local current_status=$(get_status "$dir_name")
-                        # Toggle status
                         if [[ $current_status -eq 0 ]]; then
                             set_status "$dir_name" 1
                         else
@@ -249,20 +217,16 @@ function xy_emby_sync() {
                         individual_toggled=1
 
                     elif [[ $choice -eq $default_index ]]; then
-                        # Toggle Default
                         if [[ $(get_status "Default") -eq 0 ]]; then
                             select_default
                         else
-                            # If user explicitly deselects "Default", clear everything
                             deselect_all
                         fi
 
                     elif [[ $choice -eq $all_index ]]; then
-                        # Toggle All
                         if [[ $(get_status "All") -eq 0 ]]; then
                             select_all
                         else
-                            # If user explicitly deselects "All", clear everything
                             deselect_all
                         fi
                     else
@@ -273,7 +237,6 @@ function xy_emby_sync() {
             esac
         done
 
-        # If any individual directory was toggled, recalculate Default/All status
         if [[ $individual_toggled -eq 1 ]]; then
             update_special_statuses
         fi
@@ -337,7 +300,6 @@ function xy_emby_sync() {
             continue
         fi
 
-        # Check if it's >= 12
         if [[ "$sync_interval_input" -lt 12 ]]; then
             echo -e "\033[31m错误: 同步间隔必须大于或等于 12 小时. 您输入的是 '$sync_interval_input'. 请重新输入.\033[0m"
             continue
@@ -399,8 +361,6 @@ function xy_emby_sync() {
         echo -e "\033[33m将为您使用默认DNS.\033[0m"
     fi
 
-    # --- 容器类型选择交互 ---
-    # 检查是否已经预设了container_mode
     if [[ -n "${container_mode}" ]]; then
         echo -e "\n\033[1;36m=== 容器类型配置 ===\033[0m"
         echo -e "\033[32m使用预设模式: ${container_mode}\033[0m"
@@ -433,7 +393,6 @@ function xy_emby_sync() {
         done
     fi
 
-    # --- Construct Final Directory String ---
     selected_dirs_array=()
     for dir in "${DIRS[@]}"; do
         if [[ $(get_status "$dir") -eq 1 ]]; then
@@ -444,23 +403,18 @@ function xy_emby_sync() {
     output_string=$(printf "%s," "${selected_dirs_array[@]}")
     output_string=${output_string%,}
 
-    # 找出所有使用ailg/xy-emd镜像的容器名
     docker_emd_names="$(docker ps -a | grep -E 'ailg/xy-emd' | awk '{print $NF}')"
     
-    # 根据用户选择的模式进行容器处理
     for emd_name in $docker_emd_names; do
         if [[ "${container_mode}" == "jellyfin" ]]; then
             if [[ "$emd_name" == "xy-emd-jf" ]]; then
-                # Jellyfin模式下，清理xy-emd-jf容器
                 docker rm -f "$emd_name"
                 echo -e "\033[33m已清理旧容器：$emd_name\033[0m"
             elif [[ "$emd_name" != "xy-emd" ]]; then
-                # 不是标准名称的容器，只停止不删除
                 docker stop "$emd_name" 2>/dev/null
                 echo -e "\033[36m已停止非标准名称容器：$emd_name\033[0m"
             fi
         else
-            # 默认emby模式
             if [[ "$emd_name" == "xy-emd" ]]; then
                 docker rm -f "$emd_name"
                 echo -e "\033[33m已清理旧容器：$emd_name\033[0m"
@@ -470,14 +424,12 @@ function xy_emby_sync() {
             fi
         fi
     done
-    # 根据架构选择镜像
     if [[ $(uname -m) == "armv7l" ]]; then
         emd_image="ailg/xy-emd:arm7-latest"
     else
         emd_image="ailg/xy-emd:latest"
     fi
     
-    # 根据用户选择设置MODE环境变量和容器名
     local mode_env_var=""
     local container_name=""
     if [[ "${container_mode}" == "emby" ]]; then
