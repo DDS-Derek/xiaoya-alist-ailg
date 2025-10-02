@@ -225,6 +225,21 @@ get_loop_device() {
 cleanup_container_loops() {
     INFO "开始清理容器内无效的loop设备绑定..." >&2
     
+    local protected_loops=""
+    if [ -f "/ailg/.loop" ]; then
+        local media_loop=$(grep "^media " "/ailg/.loop" 2>/dev/null | awk '{print $2}')
+        local config_loop=$(grep "^config " "/ailg/.loop" 2>/dev/null | awk '{print $2}')
+        
+        if [ -n "$media_loop" ]; then
+            protected_loops="$protected_loops $media_loop"
+            INFO "保护media loop设备: $media_loop" >&2
+        fi
+        if [ -n "$config_loop" ]; then
+            protected_loops="$protected_loops $config_loop"
+            INFO "保护config loop设备: $config_loop" >&2
+        fi
+    fi
+    
     local loop_devices=$(losetup -a)
     local cleaned_count=0
     
@@ -235,6 +250,19 @@ cleanup_container_loops() {
         
         local loop_device=$(echo "$line" | cut -d: -f1)
         local back_file=""
+        
+        local is_protected=false
+        for protected_loop in $protected_loops; do
+            if [ "$loop_device" = "$protected_loop" ]; then
+                is_protected=true
+                break
+            fi
+        done
+        
+        if [ "$is_protected" = true ]; then
+            INFO "跳过受保护的loop设备: $loop_device" >&2
+            continue
+        fi
         
         if echo "$line" | grep -q "("; then
             back_file=$(echo "$line" | sed 's/.*(\([^)]*\)).*/\1/')
