@@ -1880,8 +1880,20 @@ get_loop_from_state_file() {
     local state_file="$img_dir/.loop"
     
     if [ -f "$state_file" ]; then
-        # 读取.loop文件中的loop设备号
-        local recorded_loop=$(head -n1 "$state_file" | awk '{print $1}')
+        # 根据img文件名确定类型
+        local img_type=""
+        local img_name=$(basename "$img_file")
+        
+        if [[ "$img_name" =~ ^emby-ailg.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-ailg.*\.img$ ]]; then
+            img_type="media"
+        elif [[ "$img_name" =~ ^emby-config.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-config.*\.img$ ]]; then
+            img_type="config"
+        else
+            return 1
+        fi
+        
+        # 查找对应类型的loop设备
+        local recorded_loop=$(grep "^$img_type " "$state_file" | awk '{print $2}')
         if [ -n "$recorded_loop" ]; then
             echo "$recorded_loop"
             return 0
@@ -1901,9 +1913,44 @@ update_loop_state_file() {
     # 确保目录存在
     mkdir -p "$img_dir"
     
-    # 写入loop设备号和img文件路径
-    echo "$loop_device $img_file" > "$state_file"
-    INFO "已更新状态文件: $state_file -> $loop_device" >&2
+    # 根据img文件名确定类型
+    local img_type=""
+    local img_name=$(basename "$img_file")
+    
+    if [[ "$img_name" =~ ^emby-ailg.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-ailg.*\.img$ ]]; then
+        img_type="media"
+    elif [[ "$img_name" =~ ^emby-config.*\.img$ ]] || [[ "$img_name" =~ ^jellyfin-config.*\.img$ ]]; then
+        img_type="config"
+    else
+        ERROR "不支持的镜像文件类型: $img_name"
+        return 1
+    fi
+    
+    # 读取现有文件内容
+    local temp_file=$(mktemp)
+    local updated=false
+    
+    if [ -f "$state_file" ]; then
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^$img_type\  ]]; then
+                # 更新现有行
+                echo "$img_type $loop_device $img_file" >> "$temp_file"
+                updated=true
+            else
+                # 保留其他行
+                echo "$line" >> "$temp_file"
+            fi
+        done < "$state_file"
+    fi
+    
+    # 如果没有找到对应类型的行，添加新行
+    if [ "$updated" = false ]; then
+        echo "$img_type $loop_device $img_file" >> "$temp_file"
+    fi
+    
+    # 替换原文件
+    mv "$temp_file" "$state_file"
+    INFO "已更新状态文件: $state_file -> $img_type: $loop_device" >&2
 }
 
 # 检查loop设备是否已绑定到指定img文件
