@@ -133,6 +133,9 @@ get_loop_device() {
                 # 容器内格式: 查找末尾的img_file
                 existing_binding=$(losetup -a | grep "/$img_file")
             fi
+            # 检查指定的loop_device是否已经被绑定到其他文件
+            local loop_device_binding=$(losetup -a | grep "^$loop_device:")
+            
             if [ -n "$existing_binding" ]; then
                 local existing_loop=$(echo "$existing_binding" | cut -d: -f1)
                 INFO "发现已有loop绑定: $existing_loop -> /$img_file" >&2
@@ -169,6 +172,17 @@ get_loop_device() {
                     # 卸载当前绑定的loop设备
                     umount -l "$existing_loop" 2>/dev/null
                     losetup -d "$existing_loop" 2>/dev/null
+                fi
+            elif [ -n "$loop_device_binding" ]; then
+                # 指定的loop_device已经被绑定到其他文件，需要先解除绑定
+                INFO "loop设备 $loop_device 已被绑定到其他文件，先解除绑定" >&2
+                umount -l "$loop_device" 2>/dev/null
+                losetup -d "$loop_device" 2>/dev/null
+                # 验证losetup -d是否成功
+                if ! losetup -a | grep -q "^$loop_device:"; then
+                    INFO "成功解除loop设备绑定: $loop_device" >&2
+                else
+                    WARN "losetup -d可能未完全成功，但继续尝试重新绑定" >&2
                 fi
             else
                 INFO "容器中无/media.img相关的loop绑定，使用.loop中的设备号" >&2
