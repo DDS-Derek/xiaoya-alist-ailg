@@ -1605,7 +1605,33 @@ emby_close_6908_port() {
 
 
 cleanup_invalid_loops() {
+    local img_path="$1"
     INFO "开始清理无效的loop设备绑定..." >&2
+    
+    local protected_loops=""
+    
+    if [ -n "$img_path" ]; then
+        local img_dir=$(dirname "$img_path")
+        local loop_file="$img_dir/.loop"
+        
+        if [ -f "$loop_file" ]; then
+            local media_loop=$(grep "^media " "$loop_file" 2>/dev/null | awk '{print $2}')
+            local config_loop=$(grep "^config " "$loop_file" 2>/dev/null | awk '{print $2}')
+            
+            if [ -n "$media_loop" ]; then
+                protected_loops="$protected_loops $media_loop"
+                INFO "保护media loop设备: $media_loop (来自 $loop_file)" >&2
+            fi
+            if [ -n "$config_loop" ]; then
+                protected_loops="$protected_loops $config_loop"
+                INFO "保护config loop设备: $config_loop (来自 $loop_file)" >&2
+            fi
+        else
+            INFO "未找到.loop文件: $loop_file" >&2
+        fi
+    else
+        INFO "未提供img_path参数，跳过保护检查" >&2
+    fi
     
     local loop_devices=$(losetup -a)
     local cleaned_count=0
@@ -1617,6 +1643,19 @@ cleanup_invalid_loops() {
         
         local loop_device=$(echo "$line" | cut -d: -f1)
         local back_file=""
+        
+        local is_protected=false
+        for protected_loop in $protected_loops; do
+            if [ "$loop_device" = "$protected_loop" ]; then
+                is_protected=true
+                break
+            fi
+        done
+        
+        if [ "$is_protected" = true ]; then
+            INFO "跳过受保护的loop设备: $loop_device" >&2
+            continue
+        fi
         
         if echo "$line" | grep -q "("; then
             back_file=$(echo "$line" | sed 's/.*(\([^)]*\)).*/\1/')
@@ -1785,7 +1824,7 @@ smart_bind_loop_device() {
     
     INFO "开始智能绑定loop设备: $img_file" >&2
     
-    cleanup_invalid_loops
+    cleanup_invalid_loops "$img_file"
     
     local loop_device=""
     if loop_device=$(get_loop_from_state_file "$img_file"); then

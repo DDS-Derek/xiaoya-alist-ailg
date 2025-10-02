@@ -1801,58 +1801,84 @@ emby_close_6908_port() {
 
 # 清理无效的loop设备绑定
 cleanup_invalid_loops() {
+    local img_path="$1"
     INFO "开始清理无效的loop设备绑定..." >&2
     
-    # 获取所有loop设备信息
+    local protected_loops=""
+    
+    if [ -n "$img_path" ]; then
+        local img_dir=$(dirname "$img_path")
+        local loop_file="$img_dir/.loop"
+        
+        if [ -f "$loop_file" ]; then
+            local media_loop=$(grep "^media " "$loop_file" 2>/dev/null | awk '{print $2}')
+            local config_loop=$(grep "^config " "$loop_file" 2>/dev/null | awk '{print $2}')
+            
+            if [ -n "$media_loop" ]; then
+                protected_loops="$protected_loops $media_loop"
+                INFO "保护media loop设备: $media_loop (来自 $loop_file)" >&2
+            fi
+            if [ -n "$config_loop" ]; then
+                protected_loops="$protected_loops $config_loop"
+                INFO "保护config loop设备: $config_loop (来自 $loop_file)" >&2
+            fi
+        else
+            INFO "未找到.loop文件: $loop_file" >&2
+        fi
+    else
+        INFO "未提供img_path参数，跳过保护检查" >&2
+    fi
+    
     local loop_devices=$(losetup -a)
     local cleaned_count=0
     
-    # 解析每个loop设备
     echo "$loop_devices" | while IFS= read -r line; do
         if [ -z "$line" ]; then
             continue
         fi
         
-        # 提取loop设备号和绑定路径
         local loop_device=$(echo "$line" | cut -d: -f1)
         local back_file=""
         
-        # 处理不同格式的losetup输出
-        # 宿主机格式: /dev/loop11: [64002]:231277388 (/media.img), offset 10000000
+        local is_protected=false
+        for protected_loop in $protected_loops; do
+            if [ "$loop_device" = "$protected_loop" ]; then
+                is_protected=true
+                break
+            fi
+        done
+        
+        if [ "$is_protected" = true ]; then
+            INFO "跳过受保护的loop设备: $loop_device" >&2
+            continue
+        fi
+        
         if echo "$line" | grep -q "("; then
             back_file=$(echo "$line" | sed 's/.*(\([^)]*\)).*/\1/')
-        # 容器内格式: /dev/loop11: 10000000 /media.img
         else
             back_file=$(echo "$line" | awk '{print $NF}')
         fi
         
-        # 检查是否需要清理
         local should_cleanup=false
         
-        # 清理绑定到根目录"/"的设备
         if [ "$back_file" = "/" ]; then
             should_cleanup=true
             INFO "发现绑定到根目录的loop设备: $loop_device" >&2
-        # 清理绑定到"/xxx.img"格式的设备（不包括/config.img和/media.img）
         elif [[ "$back_file" =~ ^/[^/]*\.img$ ]] && [ "$back_file" != "/config.img" ] && [ "$back_file" != "/media.img" ]; then
             should_cleanup=true
             INFO "发现无效绑定的loop设备: $loop_device -> $back_file" >&2
         fi
         
-        # 执行清理
         if [ "$should_cleanup" = true ]; then
             INFO "正在清理loop设备: $loop_device" >&2
             
-            # 先尝试卸载
             if umount -l "$loop_device" 2>/dev/null; then
                 INFO "成功卸载: $loop_device" >&2
             else
                 INFO "卸载失败或未挂载: $loop_device" >&2
             fi
             
-            # 然后解除绑定
             if losetup -d "$loop_device" 2>/dev/null; then
-                # 验证是否真的解除绑定了
                 if ! losetup -a | grep -q "^$loop_device:"; then
                     INFO "成功解除绑定: $loop_device" >&2
                     cleaned_count=$((cleaned_count + 1))

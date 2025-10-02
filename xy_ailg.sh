@@ -687,7 +687,7 @@ function user_emby_fast() {
             INFO "${op_emby}容器已关闭！"
 
             if [[ "${host_path}" =~ .*\.img ]]; then
-                cleanup_invalid_loops
+                cleanup_invalid_loops "${host_path}"
                 
                 media_loop=$(losetup -a | grep "${host_path}" | head -n1 | cut -d: -f1)
                 if [ -n "$media_loop" ]; then
@@ -1540,7 +1540,7 @@ mount_img() {
                     # docker stop ${emby_name}
                     # stop_related_containers "${img_path}"
 
-                    cleanup_invalid_loops
+                    cleanup_invalid_loops "${img_path}"
                     
                     # if [ -n "$img_loop" ]; then
                     #     umount -l "$img_loop" > /dev/null 2>&1
@@ -1702,7 +1702,7 @@ expand_img() {
                 elif [ "${img_select}" -eq 0 ]; then
                     get_img_path "$expand_type"
                     expand_diy_img_path "$expand_type"
-                    cleanup_invalid_loops
+                    cleanup_invalid_loops "${img_path}"
                     
                     img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
                     [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
@@ -1715,7 +1715,7 @@ expand_img() {
             ERROR "未找到可扩容的${expand_type}镜像，请手动输入路径"
             get_img_path "$expand_type"
             expand_diy_img_path "$expand_type"
-            cleanup_invalid_loops
+            cleanup_invalid_loops "${img_path}"
             
             img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
             [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
@@ -1727,7 +1727,7 @@ expand_img() {
         expand_size=${expand_size:-50}
         get_img_path "$expand_type"
         expand_diy_img_path "$expand_type"
-        cleanup_invalid_loops
+        cleanup_invalid_loops "${img_path}"
         
         img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
         [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
@@ -1750,7 +1750,7 @@ expand_diy_img_path() {
     INFO "小雅爬虫容器已关闭！"
 
     INFO "清理镜像相关的loop设备: ${img_path}"
-    cleanup_invalid_loops
+    cleanup_invalid_loops "${img_path}"
     img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
     if [ -n "$img_loop" ]; then
         umount -l "$img_loop" > /dev/null 2>&1
