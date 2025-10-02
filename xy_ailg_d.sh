@@ -712,6 +712,9 @@ function user_emby_fast() {
             INFO "${op_emby}容器已关闭！"
 
             if [[ "${host_path}" =~ .*\.img ]]; then
+                # 先清理无效的loop设备
+                cleanup_invalid_loops
+                
                 # 动态查找并清理媒体库相关的loop设备
                 media_loop=$(losetup -a | grep "${host_path}" | head -n1 | cut -d: -f1)
                 if [ -n "$media_loop" ]; then
@@ -840,9 +843,9 @@ function user_emby_fast() {
         INFO "本地已有配置文件镜像，无需重新处理！"
     fi
 
-    if [ ! -f /usr/bin/mount_ailg ]; then
-        docker cp "${docker_name}":/var/lib/mount_ailg "/usr/bin/mount_ailg"
-        chmod 777 /usr/bin/mount_ailg
+    if [ ! -f /usr/bin/smart_mount_img ]; then
+        docker cp "${docker_name}":/var/lib/smart_mount_img "/usr/bin/smart_mount_img"
+        chmod 777 /usr/bin/smart_mount_img
     fi
 
     INFO "开始安装小雅emby/jellyfin……"
@@ -1422,6 +1425,40 @@ stop_related_containers() {
     return 0
 }
 
+# 智能挂载img文件
+smart_mount_img() {
+    local img_path="$1"
+    local mount_point="$2"
+    
+    if [ ! -f "$img_path" ]; then
+        ERROR "img文件不存在: $img_path"
+        return 1
+    fi
+    
+    INFO "开始智能挂载: $img_path -> $mount_point"
+    
+    # 确保挂载点目录存在
+    mkdir -p "$mount_point"
+    
+    # 使用智能loop设备绑定
+    local loop_device
+    if loop_device=$(smart_bind_loop_device "$img_path"); then
+        INFO "成功获取loop设备: $loop_device"
+        
+        # 尝试挂载
+        if mount "$loop_device" "$mount_point"; then
+            INFO "成功挂载: $loop_device -> $mount_point"
+            return 0
+        else
+            ERROR "挂载失败: $loop_device -> $mount_point"
+            return 1
+        fi
+    else
+        ERROR "获取loop设备失败: $img_path"
+        return 1
+    fi
+}
+
 mount_img() {
     mount_type=""
     
@@ -1464,9 +1501,9 @@ mount_img() {
     # check_loop_support
     get_emby_status > /dev/null
     # update_ailg ailg/ggbond:latest
-    if [ ! -f /usr/bin/mount_ailg ]; then
-        docker cp g-box:/var/lib/mount_ailg "/usr/bin/mount_ailg"
-        chmod 777 /usr/bin/mount_ailg
+    if [ ! -f /usr/bin/smart_mount_img ]; then
+        docker cp g-box:/var/lib/smart_mount_img "/usr/bin/smart_mount_img"
+        chmod 777 /usr/bin/smart_mount_img
     fi
     if [ ${#emby_list[@]} -ne 0 ]; then
         for entry in "${emby_list[@]}"; do
@@ -1562,6 +1599,10 @@ mount_img() {
 
                     # docker ps -a | grep 'ddsderek/xiaoya-emd' | awk '{print $1}' | xargs -r docker stop
                     # INFO "小雅爬虫容器已关闭！"
+                    # 先清理无效的loop设备
+                    cleanup_invalid_loops
+                    
+                    # 动态清理可能存在的loop设备
                     if [ -n "$img_loop" ]; then
                         umount -l "$img_loop" > /dev/null 2>&1
                         losetup -d "$img_loop" > /dev/null 2>&1
@@ -1577,7 +1618,7 @@ mount_img() {
                     sleep 5
 
                     if ! docker ps --format '{{.Names}}' | grep -q "^${emby_name}$"; then
-                        if mount_ailg "${img_path}" "${img_mount}"; then
+                        if smart_mount_img "${img_path}" "${img_mount}"; then
                             INFO "已将${img_path}挂载到${img_mount}目录！"
                             return 0
                         else
@@ -1598,7 +1639,7 @@ mount_img() {
                     # 手动输入路径
                     get_img_path "$mount_type"
                     
-                    if mount_ailg "${img_path}" "${img_mount}"; then
+                    if smart_mount_img "${img_path}" "${img_mount}"; then
                         INFO "已将${img_path}挂载到${img_mount}目录！"
                     else
                         ERROR "挂载失败，请重启设备后重试！"
@@ -1615,7 +1656,7 @@ mount_img() {
 
             get_img_path "$mount_type"
             
-            if mount_ailg "${img_path}" "${img_mount}"; then
+            if smart_mount_img "${img_path}" "${img_mount}"; then
                 INFO "已将${img_path}挂载到${img_mount}目录！"
             else
                 ERROR "挂载失败，请重启设备后重试！"
@@ -1628,7 +1669,7 @@ mount_img() {
 
         get_img_path "$mount_type"
         
-        if mount_ailg "${img_path}" "${img_mount}"; then
+        if smart_mount_img "${img_path}" "${img_mount}"; then
             INFO "已将${img_path}挂载到${img_mount}目录！"
         else
             ERROR "挂载失败，请重启设备后重试！"
@@ -1645,9 +1686,9 @@ expand_img() {
     # check_loop_support
     get_emby_status > /dev/null
     # update_ailg ailg/ggbond:latest
-    if [ ! -f /usr/bin/mount_ailg ]; then
-        docker cp g-box:/var/lib/mount_ailg "/usr/bin/mount_ailg"
-        chmod 777 /usr/bin/mount_ailg
+    if [ ! -f /usr/bin/smart_mount_img ]; then
+        docker cp g-box:/var/lib/smart_mount_img "/usr/bin/smart_mount_img"
+        chmod 777 /usr/bin/smart_mount_img
     fi
     
     # 先询问用户要扩容的镜像类型
@@ -1727,6 +1768,9 @@ expand_img() {
                     # 手动输入路径
                     get_img_path "$expand_type"
                     expand_diy_img_path "$expand_type"
+                    # 先清理无效的loop设备
+                    cleanup_invalid_loops
+                    
                     # 动态清理可能存在的loop设备
                     img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
                     [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
@@ -1739,6 +1783,9 @@ expand_img() {
             ERROR "未找到可扩容的${expand_type}镜像，请手动输入路径"
             get_img_path "$expand_type"
             expand_diy_img_path "$expand_type"
+            # 先清理无效的loop设备
+            cleanup_invalid_loops
+            
             # 动态清理可能存在的loop设备
             img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
             [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
@@ -1750,6 +1797,9 @@ expand_img() {
         expand_size=${expand_size:-50}
         get_img_path "$expand_type"
         expand_diy_img_path "$expand_type"
+        # 先清理无效的loop设备
+        cleanup_invalid_loops
+        
         # 动态清理可能存在的loop设备
         img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
         [ -n "$img_loop" ] && losetup -d "$img_loop" > /dev/null 2>&1
@@ -1771,6 +1821,9 @@ expand_diy_img_path() {
     docker ps -a | grep 'ailg/xy-emd' | awk '{print $1}' | xargs -r docker stop
     INFO "小雅爬虫容器已关闭！"
 
+    # 使用智能loop设备管理清理
+    INFO "清理镜像相关的loop设备: ${img_path}"
+    cleanup_invalid_loops
     img_loop=$(losetup -a | grep "${img_path}" | head -n1 | cut -d: -f1)
     if [ -n "$img_loop" ]; then
         umount -l "$img_loop" > /dev/null 2>&1

@@ -1795,10 +1795,250 @@ emby_close_6908_port() {
     INFO "现在只能通过 2345 端口访问 Emby，6908 端口已被屏蔽！"
 }
 
+# ——————————————————————————————————————————————————————————————————————————————————
+# Loop设备管理函数
+# ——————————————————————————————————————————————————————————————————————————————————
+
+# 清理无效的loop设备绑定
+cleanup_invalid_loops() {
+    INFO "开始清理无效的loop设备绑定..." >&2
+    
+    # 获取所有loop设备信息
+    local loop_devices=$(losetup -a)
+    local cleaned_count=0
+    
+    # 解析每个loop设备
+    echo "$loop_devices" | while IFS= read -r line; do
+        if [ -z "$line" ]; then
+            continue
+        fi
+        
+        # 提取loop设备号和绑定路径
+        local loop_device=$(echo "$line" | cut -d: -f1)
+        local back_file=""
+        
+        # 处理不同格式的losetup输出
+        # 宿主机格式: /dev/loop11: [64002]:231277388 (/media.img), offset 10000000
+        if echo "$line" | grep -q "("; then
+            back_file=$(echo "$line" | sed 's/.*(\([^)]*\)).*/\1/')
+        # 容器内格式: /dev/loop11: 10000000 /media.img
+        else
+            back_file=$(echo "$line" | awk '{print $NF}')
+        fi
+        
+        # 检查是否需要清理
+        local should_cleanup=false
+        
+        # 清理绑定到根目录"/"的设备
+        if [ "$back_file" = "/" ]; then
+            should_cleanup=true
+            INFO "发现绑定到根目录的loop设备: $loop_device" >&2
+        # 清理绑定到"/xxx.img"格式的设备（不包括/config.img和/media.img）
+        elif [[ "$back_file" =~ ^/[^/]*\.img$ ]] && [ "$back_file" != "/config.img" ] && [ "$back_file" != "/media.img" ]; then
+            should_cleanup=true
+            INFO "发现无效绑定的loop设备: $loop_device -> $back_file" >&2
+        fi
+        
+        # 执行清理
+        if [ "$should_cleanup" = true ]; then
+            INFO "正在清理loop设备: $loop_device" >&2
+            
+            # 先尝试卸载
+            if umount -l "$loop_device" 2>/dev/null; then
+                INFO "成功卸载: $loop_device" >&2
+            else
+                INFO "卸载失败或未挂载: $loop_device" >&2
+            fi
+            
+            # 然后解除绑定
+            if losetup -d "$loop_device" 2>/dev/null; then
+                # 验证是否真的解除绑定了
+                if ! losetup -a | grep -q "^$loop_device:"; then
+                    INFO "成功解除绑定: $loop_device" >&2
+                    cleaned_count=$((cleaned_count + 1))
+                else
+                    WARN "解除绑定命令执行成功但设备仍存在: $loop_device" >&2
+                fi
+            else
+                WARN "解除绑定失败: $loop_device" >&2
+            fi
+        fi
+        
+    done
+    
+    if [ $cleaned_count -gt 0 ]; then
+        INFO "清理完成，共清理了 $cleaned_count 个无效的loop设备" >&2
+    else
+        INFO "未发现需要清理的无效loop设备" >&2
+    fi
+}
+
+# 获取或创建.loop状态文件中的loop设备号
+get_loop_from_state_file() {
+    local img_file="$1"
+    local img_dir=$(dirname "$img_file")
+    local state_file="$img_dir/.loop"
+    
+    if [ -f "$state_file" ]; then
+        # 读取.loop文件中的loop设备号
+        local recorded_loop=$(head -n1 "$state_file" | awk '{print $1}')
+        if [ -n "$recorded_loop" ]; then
+            echo "$recorded_loop"
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# 更新.loop状态文件
+update_loop_state_file() {
+    local img_file="$1"
+    local loop_device="$2"
+    local img_dir=$(dirname "$img_file")
+    local state_file="$img_dir/.loop"
+    
+    # 确保目录存在
+    mkdir -p "$img_dir"
+    
+    # 写入loop设备号和img文件路径
+    echo "$loop_device $img_file" > "$state_file"
+    INFO "已更新状态文件: $state_file -> $loop_device" >&2
+}
+
+# 检查loop设备是否已绑定到指定img文件
+check_loop_binding() {
+    local img_file="$1"
+    local loop_device="$2"
+    
+    # 检查指定loop设备是否绑定到指定img文件
+    local binding_info=$(losetup -a | grep "^$loop_device:")
+    if [ -n "$binding_info" ]; then
+        # 处理不同格式的losetup输出
+        local bound_file=""
+        
+        # 宿主机格式: /dev/loop11: [64002]:231277388 (/media.img), offset 10000000
+        if echo "$binding_info" | grep -q "("; then
+            bound_file=$(echo "$binding_info" | sed 's/.*(\([^)]*\)).*/\1/')
+        # 容器内格式: /dev/loop11: 10000000 /media.img
+        else
+            bound_file=$(echo "$binding_info" | awk '{print $NF}')
+        fi
+        
+        if [ "$bound_file" = "$img_file" ]; then
+            return 0  # 已正确绑定
+        fi
+    fi
+    
+    return 1  # 未绑定或绑定错误
+}
+
+# 智能绑定loop设备到img文件
+smart_bind_loop_device() {
+    local img_file="$1"
+    local offset="${2:-10000000}"
+    
+    if [ ! -f "$img_file" ]; then
+        ERROR "img文件不存在: $img_file"
+        return 1
+    fi
+    
+    INFO "开始智能绑定loop设备: $img_file" >&2
+    
+    # 先清理无效的loop设备
+    cleanup_invalid_loops
+    
+    # 尝试从状态文件获取loop设备号
+    local loop_device=""
+    if loop_device=$(get_loop_from_state_file "$img_file"); then
+        INFO "从状态文件获取到loop设备: $loop_device" >&2
+        
+        # 检查该loop设备是否已正确绑定
+        if check_loop_binding "$img_file" "$loop_device"; then
+            INFO "loop设备 $loop_device 已正确绑定到 $img_file" >&2
+            echo "$loop_device"
+            return 0
+        else
+            INFO "loop设备 $loop_device 未正确绑定，尝试重新绑定" >&2
+            # 先清理该loop设备的现有绑定
+            INFO "清理loop设备 $loop_device 的现有绑定" >&2
+            umount -l "$loop_device" 2>/dev/null
+            if losetup -d "$loop_device" 2>/dev/null; then
+                # 验证是否真的解除绑定了
+                if ! losetup -a | grep -q "^$loop_device:"; then
+                    INFO "成功清理loop设备: $loop_device" >&2
+                else
+                    WARN "清理命令执行成功但设备仍存在: $loop_device" >&2
+                fi
+            else
+                WARN "清理loop设备失败: $loop_device" >&2
+            fi
+            
+            # 尝试重新绑定这个loop设备
+            if losetup -o "$offset" "$loop_device" "$img_file"; then
+                INFO "成功重新绑定loop设备: $loop_device -> $img_file" >&2
+                # 更新状态文件
+                update_loop_state_file "$img_file" "$loop_device"
+                echo "$loop_device"
+                return 0
+            else
+                INFO "重新绑定失败，将获取新的loop设备" >&2
+            fi
+        fi
+    fi
+    
+    # 检查是否已有其他loop设备绑定到此img文件
+    local existing_loop=""
+    # 处理不同格式的losetup输出
+    if losetup -a | grep -q "("; then
+        # 宿主机格式: 查找 (/img_file) 格式
+        existing_loop=$(losetup -a | grep "($img_file)" | head -n1 | cut -d: -f1)
+    else
+        # 容器内格式: 查找末尾的img_file
+        existing_loop=$(losetup -a | grep " $img_file" | head -n1 | cut -d: -f1)
+    fi
+    if [ -n "$existing_loop" ]; then
+        INFO "发现已有loop设备绑定到此img文件: $existing_loop" >&2
+        # 更新状态文件
+        update_loop_state_file "$img_file" "$existing_loop"
+        echo "$existing_loop"
+        return 0
+    fi
+    
+    # 获取新的loop设备
+    loop_device=$(losetup -f)
+    if [ -z "$loop_device" ]; then
+        ERROR "无法获取可用的loop设备"
+        return 1
+    fi
+    
+    # 检查设备是否存在，如果不存在则创建
+    if [ ! -e "$loop_device" ]; then
+        local loop_num=$(echo "$loop_device" | grep -o '[0-9]\+$')
+        if ! mknod "$loop_device" b 7 "$loop_num" 2>/dev/null; then
+            ERROR "无法创建loop设备: $loop_device"
+            return 1
+        fi
+    fi
+    
+    # 绑定loop设备
+    if losetup -o "$offset" "$loop_device" "$img_file"; then
+        INFO "成功绑定loop设备: $loop_device -> $img_file" >&2
+        # 更新状态文件
+        update_loop_state_file "$img_file" "$loop_device"
+        echo "$loop_device"
+        return 0
+    else
+        ERROR "绑定loop设备失败: $loop_device -> $img_file" >&2
+        return 1
+    fi
+}
+
 # 导出函数
 export -f INFO ERROR WARN \
     check_path check_port check_space check_root check_env check_loop_support check_qnap \
     setup_status command_exists \
     docker_pull update_ailg restore_containers restore_containers_simple \
     xy_media_reunzip \
-    emby_close_6908_port get_docker0_ip wait_emby_start wait_gbox_start
+    emby_close_6908_port get_docker0_ip wait_emby_start wait_gbox_start \
+    cleanup_invalid_loops get_loop_from_state_file update_loop_state_file check_loop_binding smart_bind_loop_device
