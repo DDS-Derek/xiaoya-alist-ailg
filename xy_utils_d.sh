@@ -99,7 +99,7 @@ check_env() {
     fi
 
     if ! grep -q 'alias gbox' /etc/profile; then
-        echo -e "alias gbox='bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install.sh)\"'" >> /etc/profile
+        echo -e "alias gbox='bash -c \"\$(curl -sSLf https://ailg.ggbond.org/xy_install_d.sh)\"'" >> /etc/profile
     fi
     source /etc/profile
 

@@ -2,8 +2,8 @@
 # shellcheck shell=bash
 # shellcheck disable=SC2086
 
-source /tmp/xy_utils.sh
-source /tmp/xy_sync.sh
+source /tmp/xy_utils_d.sh
+source /tmp/xy_sync_d.sh
 
 PATH=${PATH}:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin:/opt/homebrew/bin
 export PATH
@@ -841,7 +841,6 @@ function user_emby_fast() {
             WARN "配置文件镜像不存在，跳过处理"
         fi
     else
-        INFO "条件不匹配：local_config_size($local_config_size) != remote_config_size($remote_config_size) 或其中一个为空"
         INFO "本地已有配置文件镜像，无需重新处理！"
     fi
 
@@ -1686,8 +1685,7 @@ mount_img() {
             echo -e "\033[1;33m未找到挂载img镜像的容器，请手动输入路径：\033[0m"
 
             get_img_path "$mount_type"
-            
-            
+                        
             if smart_mount_img "${img_path}" "${img_mount}"; then
                 INFO "已将${img_path}挂载到${img_mount}目录！"
             else
