@@ -447,8 +447,10 @@ function xy_emby_sync() {
     fi
     
     if docker_pull "${emd_image}"; then
+        # 获取img镜像的父级目录用于/ailg挂载
+        img_parent_dir=$(dirname "${mount_path}")
         docker run -d --name "${container_name}" -e CYCLE="${sync_interval_input}" ${mode_env_var} \
-            -v "${mount_path}:/media.img" --privileged --net=host --restart=always \
+            -v "${mount_path}:/media.img" -v "${img_parent_dir}:/ailg" --privileged --net=host --restart=always \
             "${emd_image}" --dirs "${output_string}" ${rebuild_env_var} ${clean_env_var} ${dns_env_var}
         echo -e "小雅Emby爬虫G-Box专用版安装成功了！"
         return 0
