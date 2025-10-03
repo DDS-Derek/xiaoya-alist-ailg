@@ -2140,7 +2140,7 @@ download_legacy_run_file() {
         fi
         
         for i in {1..3}; do
-            if curl -sSLf -o "$legacy_img_dir/run_jf" https://ailg.ggbond.org/run_jf_v2; then
+            if curl -sSLf -o "$legacy_img_dir/run_jf" https://ailg.ggbond.org/run_jf_v3; then
                 chmod +x "$legacy_img_dir/run_jf"
                 INFO "新版run_jf文件下载成功"
                 break
@@ -2159,7 +2159,7 @@ download_legacy_run_file() {
         fi
         
         for i in {1..3}; do
-            if curl -sSLf -o "$legacy_img_dir/run" https://ailg.ggbond.org/run_v2; then
+            if curl -sSLf -o "$legacy_img_dir/run" https://ailg.ggbond.org/run_v3; then
                 chmod +x "$legacy_img_dir/run"
                 INFO "新版run文件下载成功"
                 break
