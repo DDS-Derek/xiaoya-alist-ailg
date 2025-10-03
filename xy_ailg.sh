@@ -2208,10 +2208,16 @@ create_legacy_emby_container() {
         fi
     fi
     
-    if command -v ifconfig > /dev/null 2>&1; then
-        localip=$(ifconfig -a|grep inet|grep -v 172.17 | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1)
-    else
-        localip=$(ip address|grep inet|grep -v 172.17 | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1|cut -f1 -d"/")
+    if command -v ip &> /dev/null; then
+        localip=$(ip route get 223.5.5.5 2>/dev/null | grep -oE 'src [0-9.]+' | grep -oE '[0-9.]+' | head -1)
+    fi
+    
+    if [ -z "$localip" ]; then
+        if command -v ifconfig > /dev/null 2>&1; then
+            localip=$(ifconfig -a|grep inet|grep -v 172.17 | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1)
+        else
+            localip=$(ip address|grep inet|grep -v 172.17 | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1|cut -f1 -d"/")
+        fi
     fi
     
     if ! [[ -f /etc/nsswitch.conf ]]; then
@@ -2912,10 +2918,16 @@ function user_gbox() {
         $extra_volumes \
         ailg/g-box:hostmode
 
-    if command -v ifconfig &> /dev/null; then
-        localip=$(ifconfig -a|grep inet|grep -v 172. | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1)
-    else
-        localip=$(ip address|grep inet|grep -v 172. | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1|cut -f1 -d"/")
+    if command -v ip &> /dev/null; then
+        localip=$(ip route get 223.5.5.5 2>/dev/null | grep -oE 'src [0-9.]+' | grep -oE '[0-9.]+' | head -1)
+    fi
+    
+    if [ -z "$localip" ]; then
+        if command -v ifconfig &> /dev/null; then
+            localip=$(ifconfig -a|grep inet|grep -v 172. | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1)
+        else
+            localip=$(ip address|grep inet|grep -v 172. | grep -v 127.0.0.1|grep -v 169. |grep -v inet6|awk '{print $2}'|tr -d "addr:"|head -n1|cut -f1 -d"/")
+        fi
     fi
 
     echo "http://$localip:5678" > $config_dir/docker_address.txt

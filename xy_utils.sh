@@ -1554,7 +1554,7 @@ emby_close_6908_port() {
     
     local docker0 xiaoya_host
     docker0=$(get_docker0_ip)
-    xiaoya_host="127.0.0.1"  # 在only_for_emby网络中，使用127.0.0.1
+    xiaoya_host=$(ip route get 223.5.5.5 | grep -oE 'src [0-9.]+' | grep -oE '[0-9.]+' | head -1) 
     
     INFO "更改容器 host 配置"
     sed -i "s/--add-host xiaoya.host.*/--add-host xiaoya.host:${xiaoya_host} \\\/" "/tmp/container_update_${emby_name}"
