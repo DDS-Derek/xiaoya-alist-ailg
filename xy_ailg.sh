@@ -824,82 +824,81 @@ function user_emby_fast() {
     if ! [[ -f /etc/nsswitch.conf ]]; then
         echo -e "hosts:\tfiles dns\nnetworks:\tfiles" > /etc/nsswitch.conf
     fi
-    if [ ! -f "$image_dir/${init}" ]; then
-        rm -rf "$image_dir/${init}"
-        curl -o "$image_dir/${init}" https://ailg.ggbond.org/${init}_v3
-        #docker cp "${docker_name}":/var/lib/${init} "$image_dir/"
-        chmod 777 "$image_dir/${init}"
-    fi
-        config_mount_params=""
-        if [ -f "$image_dir_config/$emby_img_config" ]; then
-            config_mount_params="-v $image_dir_config/$emby_img_config:/config.img"
-        fi
 
-        if [[ "${emby_image}" =~ emby ]]; then
-            ailg_mount_params="-v $image_dir:/ailg"
-            if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
-                ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
-            fi
-            
-            docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
-                -v $image_dir/$emby_img:/media.img \
-                $config_mount_params \
-                $ailg_mount_params \
-                -v "$image_dir/run":/etc/cont-init.d/run \
-                --user 0:0 \
-                -e UID=0 -e GID=0 -e GIDLIST=0 \
-                --net=host \
-                --privileged --add-host="xiaoya.host:127.0.0.1" --restart always $emby_image
-            echo "http://127.0.0.1:6908" > $config_dir/emby_server.txt
-            fuck_cors "$emby_name"
-        elif [[ "${emby_image}" =~ jellyfin/jellyfin ]]; then
-            ailg_mount_params="-v $image_dir:/ailg"
-            if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
-                ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
-            fi
-            
-            docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
-                -v $image_dir/$emby_img:/media.img \
-                $config_mount_params \
-                $ailg_mount_params \
-                -v "$image_dir/run_jf":/etc/run_jf \
-                --entrypoint "/etc/run_jf" \
-                --user 0:0 \
-                -e XDG_CACHE_HOME=/config/cache \
-                -e LC_ALL=zh_CN.UTF-8 \
-                -e LANG=zh_CN.UTF-8 \
-                -e LANGUAGE=zh_CN:zh \
-                -e JELLYFIN_CACHE_DIR=/config/cache \
-                -e HEALTHCHECK_URL=http://localhost:6910/health \
-                --net=host \
-                --privileged --add-host="xiaoya.host:127.0.0.1" --restart always $emby_image   
-            echo "http://127.0.0.1:6910" > $config_dir/jellyfin_server.txt   
-        else
-            ailg_mount_params="-v $image_dir:/ailg"
-            if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
-                ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
-            fi
-            
-            docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
-                -v $image_dir/$emby_img:/media.img \
-                $config_mount_params \
-                $ailg_mount_params \
-                -v "$image_dir/run_jf":/etc/run_jf \
-                --entrypoint "/etc/run_jf" \
-                --user 0:0 \
-                -e XDG_CACHE_HOME=/config/cache \
-                -e LC_ALL=zh_CN.UTF-8 \
-                -e LANG=zh_CN.UTF-8 \
-                -e LANGUAGE=zh_CN:zh \
-                -e JELLYFIN_CACHE_DIR=/config/cache \
-                -e HEALTHCHECK_URL=http://localhost:6909/health \
-                -p 6909:6909 \
-                -p 6920:6920 \
-                -p 1909:1900/udp \
-                -p 6359:7359/udp \
-                --privileged --add-host="xiaoya.host:${host_ip}" --restart always $emby_image
-            echo "${host}:6909" > $config_dir/jellyfin_server.txt
+    rm -f "$image_dir/${init}" > /dev/null 2>&1
+    docker cp "${docker_name}":/var/lib/${init} "$image_dir/"
+    chmod 777 "$image_dir/${init}"
+
+    config_mount_params=""
+    if [ -f "$image_dir_config/$emby_img_config" ]; then
+        config_mount_params="-v $image_dir_config/$emby_img_config:/config.img"
+    fi
+
+    if [[ "${emby_image}" =~ emby ]]; then
+        ailg_mount_params="-v $image_dir:/ailg"
+        if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
+            ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
         fi
+        
+        docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
+            -v $image_dir/$emby_img:/media.img \
+            $config_mount_params \
+            $ailg_mount_params \
+            -v "$image_dir/run":/etc/cont-init.d/run \
+            --user 0:0 \
+            -e UID=0 -e GID=0 -e GIDLIST=0 \
+            --net=host \
+            --privileged --add-host="xiaoya.host:127.0.0.1" --restart always $emby_image
+        echo "http://127.0.0.1:6908" > $config_dir/emby_server.txt
+        fuck_cors "$emby_name"
+    elif [[ "${emby_image}" =~ jellyfin/jellyfin ]]; then
+        ailg_mount_params="-v $image_dir:/ailg"
+        if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
+            ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
+        fi
+        
+        docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
+            -v $image_dir/$emby_img:/media.img \
+            $config_mount_params \
+            $ailg_mount_params \
+            -v "$image_dir/run_jf":/etc/run_jf \
+            --entrypoint "/etc/run_jf" \
+            --user 0:0 \
+            -e XDG_CACHE_HOME=/config/cache \
+            -e LC_ALL=zh_CN.UTF-8 \
+            -e LANG=zh_CN.UTF-8 \
+            -e LANGUAGE=zh_CN:zh \
+            -e JELLYFIN_CACHE_DIR=/config/cache \
+            -e HEALTHCHECK_URL=http://localhost:6910/health \
+            --net=host \
+            --privileged --add-host="xiaoya.host:127.0.0.1" --restart always $emby_image   
+        echo "http://127.0.0.1:6910" > $config_dir/jellyfin_server.txt   
+    else
+        ailg_mount_params="-v $image_dir:/ailg"
+        if [ -n "$image_dir_config" ] && [ "$image_dir_config" != "$image_dir" ]; then
+            ailg_mount_params="$ailg_mount_params -v $image_dir_config:/ailg_config"
+        fi
+        
+        docker run -d --name $emby_name -v /etc/nsswitch.conf:/etc/nsswitch.conf \
+            -v $image_dir/$emby_img:/media.img \
+            $config_mount_params \
+            $ailg_mount_params \
+            -v "$image_dir/run_jf":/etc/run_jf \
+            --entrypoint "/etc/run_jf" \
+            --user 0:0 \
+            -e XDG_CACHE_HOME=/config/cache \
+            -e LC_ALL=zh_CN.UTF-8 \
+            -e LANG=zh_CN.UTF-8 \
+            -e LANGUAGE=zh_CN:zh \
+            -e JELLYFIN_CACHE_DIR=/config/cache \
+            -e HEALTHCHECK_URL=http://localhost:6909/health \
+            -p 6909:6909 \
+            -p 6920:6920 \
+            -p 1909:1900/udp \
+            -p 6359:7359/udp \
+            --privileged --add-host="xiaoya.host:${host_ip}" --restart always $emby_image
+        echo "${host}:6909" > $config_dir/jellyfin_server.txt
+    fi
 
     [[ ! "${emby_image}" =~ emby ]] && echo "aec47bd0434940b480c348f91e4b8c2b" > $config_dir/infuse_api_key_jf.txt
 
