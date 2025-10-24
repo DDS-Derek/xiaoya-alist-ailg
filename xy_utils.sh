@@ -1591,13 +1591,27 @@ emby_close_6908_port() {
         docker network connect only_for_emby "${gbox_name}" 2>/dev/null || WARN "无法将G-Box容器连接到 only_for_emby 网络"
     fi
     
-    INFO "配置 emby_server.txt 文件中"
-    echo "http://$ENBY_IP:6908" > "${config_dir}"/emby_server.txt
-    chown -R 0:0 "${config_dir}/emby_server.txt" 2>/dev/null || true
+    local new_config="http://$ENBY_IP:6908"
+    local config_file="${config_dir}/emby_server.txt"
+    local need_restart=false
     
-    INFO "重启G-Box容器"
-    docker restart "${gbox_name}"
-    wait_gbox_start "$gbox_name"
+    if [[ ! -f "$config_file" ]] || [[ "$(cat "$config_file" 2>/dev/null)" != "$new_config" ]]; then
+        INFO "配置 emby_server.txt 文件中"
+        echo "$new_config" > "$config_file"
+        chown -R 0:0 "$config_file" 2>/dev/null || true
+        need_restart=true
+        INFO "emby_server.txt 配置已更新"
+    else
+        INFO "emby_server.txt 配置无需更新，内容相同"
+    fi
+    
+    if [[ "$need_restart" == "true" ]]; then
+        INFO "重启G-Box容器"
+        docker restart "${gbox_name}"
+        wait_gbox_start "$gbox_name"
+    else
+        INFO "G-Box容器无需重启，配置未变更"
+    fi
     
     INFO "关闭 Emby 6908 端口完成！"
     INFO "现在只能通过 2345 端口访问 Emby，6908 端口已被屏蔽！"
