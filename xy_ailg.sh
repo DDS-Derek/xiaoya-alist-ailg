@@ -480,9 +480,9 @@ function user_emby_fast() {
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
         echo -e "\n"
-        echo -e "\033[1;32m1、小雅EMBY老G速装 - 115完整版 - 4.8.10.0（暂不可用）\033[0m"
+        echo -e "\033[1;32m1、小雅EMBY老G速装 - 115完整版 - 4.8.10.0\033[0m"
         echo -e "\n"
-        echo -e "\033[1;35m2、小雅EMBY老G速装 - 115-Lite版 - 4.8.10.0（暂不可用）\033[0m"
+        echo -e "\033[1;35m2、小雅EMBY老G速装 - 115-Lite版 - 4.8.10.0\033[0m"
         echo -e "\n"
         echo -e "\033[1;32m3、小雅EMBY老G速装 - 115完整版 - 4.9.0.38\033[0m"
         echo -e "\n"
@@ -503,20 +503,20 @@ function user_emby_fast() {
         read -erp "请输入您的选择（1-8，按b返回上级菜单或按q退出）：" f4_select
         case "$f4_select" in
         1)
-            emby_ailg="emby-ailg-115.mp4"
-            emby_img="emby-ailg-115.img"
+            emby_ailg="emby-ailg-115-4.9.mp4"
+            emby_img="emby-ailg-115-4.9.img"
             emby_ailg_config="emby-config-4.8.mp4"
             emby_img_config="emby-config-4.8.img"
-            space_need=110
+            space_need=115
             space_need_config=15
             break
             ;;
         2)
-            emby_ailg="emby-ailg-lite-115.mp4"
-            emby_img="emby-ailg-lite-115.img"
+            emby_ailg="emby-ailg-lite-115-4.9.mp4"
+            emby_img="emby-ailg-lite-115-4.9.img"
             emby_ailg_config="emby-config-lite-4.8.mp4"
             emby_img_config="emby-config-lite-4.8.img"
-            space_need=100
+            space_need=105
             space_need_config=15
             break
             ;;
