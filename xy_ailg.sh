@@ -1721,10 +1721,10 @@ expand_img() {
         fi
     else
         ERROR "未找到任何emby/jellyfin容器，请手动输入镜像路径"
+        get_img_path "$expand_type"
         echo -e "\033[1;35m请输入镜像下载后需要扩容的空间（单位：GB，默认50G可直接回车，请确保扩容后剩余空间大于5G！）:\033[0m"
         read -r expand_size
         expand_size=${expand_size:-50}
-        get_img_path "$expand_type"
         expand_diy_img_path "$expand_type"
         cleanup_invalid_loops "${img_path}"
         
