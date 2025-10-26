@@ -2798,6 +2798,63 @@ function sync_plan() {
     fi
 }
 
+# 从容器中提取版本号的函数
+extract_container_version() {
+    local container_name="$1"
+    local version_file="/tmp/GB_version_${container_name}"
+    
+    if docker cp "${container_name}:/opt/atv/data/GB_version" "$version_file" 2>/dev/null; then
+        if [ -f "$version_file" ] && [ -s "$version_file" ]; then
+            local version_content=$(cat "$version_file")
+            rm -f "$version_file"
+            
+            if [[ "$version_content" =~ ^GB\.([0-9]{6})\.[0-9]{4}$ ]]; then
+                echo "${BASH_REMATCH[1]}"
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
+# 版本检查和数据库备份函数
+check_version_and_backup() {
+    local version_to_check="$1"
+    local container_name="$2"
+    
+    if [ -n "$container_name" ]; then
+        local container_version=$(extract_container_version "$container_name")
+        if [ -n "$container_version" ]; then
+            version_to_check="$container_version"
+            INFO "从容器 $container_name 中提取到版本号: $version_to_check"
+        fi
+    fi
+    
+    if [ -n "$version_to_check" ] && [ "$version_to_check" -lt 251018 ]; then
+        echo -e "${Yellow}检测到G-Box版本 ${version_to_check} 低于 251018${NC}"
+        echo -e "${Yellow}由于架构更新，251018以前的版本需要删除数据库升级安装${NC}"
+        echo -e "${Red}继续升级会删除现有的数据库文件，如需备份请中止安装完成备份后再重新运行脚本：${NC}"
+        echo -e "${Cyan}1. 去4567页面备份cookie/token/自定义资源等（安装将终止）${NC}"
+        echo -e "${Cyan}2. 继续安装（当前数据库atv.mv.db/atv.trace.db将自动备份后删除）${NC}"
+        read -erp "$(WARN "请选择操作（1/2）：")" backup_choice
+        
+        if [ "$backup_choice" = "1" ]; then
+            INFO "备份参考https://www.bilibili.com/video/BV1U2WszhEih/，安装已终止。"
+            exit 0
+        else
+            INFO "继续安装，将自动备份数据库文件，安装完成后请删除config/data目录下atv.mv.db/atv.trace.db文件！"
+            if [ -f "${config_dir}/atv.mv.db" ]; then
+                mv "${config_dir}/atv.mv.db" "${config_dir}/atv.mv.db.bak"
+                INFO "已备份 atv.mv.db 为 atv.mv.db.bak"
+            fi
+            if [ -f "${config_dir}/atv.trace.db" ]; then
+                mv "${config_dir}/atv.trace.db" "${config_dir}/atv.trace.db.bak"
+                INFO "已备份 atv.trace.db 为 atv.trace.db.bak"
+            fi
+        fi
+    fi
+}
+
 function user_gbox() {
     WARN "安装g-box会卸载已安装的G-Box和小雅tv-box以避免端口冲突！"
     read -erp "请选择：（确认按Y/y，否则按任意键返回！）" re_setup
@@ -2807,6 +2864,12 @@ function user_gbox() {
         for keyword in "${image_keywords[@]}"; do
             for container_id in $(docker ps -a | grep "$keyword" | awk '{print $1}'); do
                 config_dir=$(docker inspect "$container_id" | jq -r '.[].Mounts[] | select(.Destination=="/data") | .Source')
+                
+                if [[ "$keyword" == "ailg/g-box" ]]; then
+                    container_name=$(docker inspect "$container_id" --format '{{.Name}}' | sed 's/^\///')
+                    check_version_and_backup "" "$container_name"
+                fi
+                
                 if docker rm -f "$container_id"; then
                     echo -e "${container_id}容器已删除！"
                 fi
@@ -3049,6 +3112,10 @@ update_gbox() {
         esac
     fi
     
+    if [ -n "${docker_name}" ]; then
+        check_version_and_backup "" "${docker_name}"
+    fi
+    
     if update_ailg "${image_name}"; then
         echo "$(date): ${image_name} 镜像更新完成！"
     else
@@ -3130,6 +3197,10 @@ temp_gbox() {
     [ -z "${config_dir}" ] && get_config_path
     docker_name="$(docker ps -a | grep -E 'ailg/g-box' | awk '{print $NF}' | head -n1)" 
     docker_name="${docker_name:-g-box}"
+    
+    if docker ps -a | grep -q "$docker_name"; then
+        check_version_and_backup "" "$docker_name"
+    fi
 
     local gb_version=""
     if [ -n "$1 " ]; then
