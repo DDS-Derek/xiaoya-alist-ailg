@@ -6,6 +6,7 @@ SCRIPT_NAME="$(basename "$0")"
 CONTAINER_NAME="pgyvpn"
 IMAGE_NAME="crpi-orhk6a4lutw1gb13.cn-hangzhou.personal.cr.aliyuncs.com/bestoray/pgyvpn"
 RC_LOCAL_PATH="/etc/rc.local"
+IP_BIN="$(command -v ip 2>/dev/null || echo /sbin/ip)"
 
 log_info()  { echo "[INFO]  $*"; }
 log_warn()  { echo "[WARN]  $*"; }
@@ -72,6 +73,28 @@ setup_tun_autostart() {
         local cron_file="/etc/cron.d/enable-tun"
         printf "@reboot root %s\n" "sh -c '$tun_lines'" > "$cron_file"
         chmod 644 "$cron_file"
+    fi
+}
+
+ensure_ipv4_forwarding() {
+    if command -v sysctl >/dev/null 2>&1; then
+        sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || echo 1 > /proc/sys/net/ipv4/ip_forward || true
+    else
+        echo 1 > /proc/sys/net/ipv4/ip_forward || true
+    fi
+    
+    if [ -f /etc/sysctl.conf ]; then
+        sed -i '/^net\.ipv4\.ip_forward[[:space:]]*=/d' /etc/sysctl.conf
+        printf '\nnet.ipv4.ip_forward=1\n' >> /etc/sysctl.conf
+        sysctl -p >/dev/null 2>&1 || true
+    fi
+}
+
+detect_host_main_interface() {
+    HOST_MAIN_IF=""
+    HOST_MAIN_IF="$($IP_BIN -4 route get 223.5.5.5 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
+    if [ -z "${HOST_MAIN_IF}" ]; then
+        HOST_MAIN_IF="$($IP_BIN -4 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}' | head -n1)"
     fi
 }
 
@@ -183,6 +206,9 @@ run_container() {
 inject_rules_into_pgystart() {
     local marker="# injected by pgyvpn_setup"
     local inject_block="${marker}\niptables -F\niptables -I FORWARD -i oray_vnc -j ACCEPT\niptables -I FORWARD -o oray_vnc -j ACCEPT\niptables -t nat -I POSTROUTING -o oray_vnc -j MASQUERADE\nip route replace ${TARGET_CIDR} via ${PEER_VIP}"
+    if [ -n "${HOST_MAIN_IF:-}" ]; then
+        inject_block="${inject_block}\niptables -I FORWARD -i ${HOST_MAIN_IF} -j ACCEPT\niptables -I FORWARD -o ${HOST_MAIN_IF} -j ACCEPT\niptables -t nat -I POSTROUTING -o ${HOST_MAIN_IF} -j MASQUERADE"
+    fi
 
     if docker exec "$CONTAINER_NAME" sh -c "grep -qF '$marker' /usr/share/pgyvpn/script/pgystart"; then
         return 0
@@ -215,6 +241,8 @@ main() {
     require_docker
     ensure_tun_device
     prompt_inputs
+    ensure_ipv4_forwarding
+    detect_host_main_interface
     ensure_container_absent_or_replace
     run_container
     inject_rules_into_pgystart
