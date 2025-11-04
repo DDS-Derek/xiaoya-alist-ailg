@@ -1911,10 +1911,380 @@ smart_bind_loop_device() {
     fi
 }
 
+check_proxy_health() {
+    local proxy_url="$1"
+    local test_url="${proxy_url}https://raw.githubusercontent.com/octocat/Hello-World/master/README"
+    
+    local content=$(curl -s --max-time 5 "$test_url" 2>/dev/null)
+
+    if [ -z "$content" ]; then
+        return 1
+    fi
+    
+    if echo "$content" | grep -qi "Hello World"; then
+        return 0
+    fi
+    
+    if echo "$content" | grep -qi '<!DOCTYPE html\|<html'; then
+        return 1
+    fi
+    
+    return 1
+}
+
+setup_gh_proxy() {
+    if [ -n "${gh_proxy}" ]; then
+        INFO "使用用户手动设置的GitHub代理: ${gh_proxy}"
+        return 0
+    fi
+    
+    local free_proxies=(
+        "https://ghfast.top/"
+        "https://github.tbedu.top/"
+        "https://tvv.tw/"
+    )
+    
+    local user_proxy="https://gh.gbox.us.kg/"
+    
+    local country=""
+    local ipv6_address=""
+    
+    INFO "正在检测网络环境..."
+    country=$(curl -s --max-time 5 ipinfo.io/country 2>/dev/null || echo "")
+    
+    ipv6_address=$(curl -s --max-time 3 -6 ipv6.ip.sb 2>/dev/null || echo "")
+    
+    local proxy_list=()
+    
+    if [ "$country" = "CN" ]; then
+        INFO "检测到国内IP，自动配置代理"
+        for proxy in "${free_proxies[@]}"; do
+            proxy_list+=("$proxy")
+        done
+        if [ -n "$user_proxy" ]; then
+            proxy_list+=("$user_proxy")
+        fi
+        proxy_list+=("https://")
+    elif [ -n "$ipv6_address" ]; then
+        INFO "检测到IPv6网络，自动配置代理"
+        for proxy in "${free_proxies[@]}"; do
+            proxy_list+=("$proxy")
+        done
+        if [ -n "$user_proxy" ]; then
+            proxy_list+=("$user_proxy")
+        fi
+        proxy_list+=("https://")
+    else
+        INFO "其他地区网络，不使用代理"
+        proxy_list+=("https://")
+    fi
+    
+    INFO "正在测试代理可用性..."
+    local selected_proxy=""
+    local proxy_available=false
+    
+    for proxy in "${proxy_list[@]}"; do
+        if [ "$proxy" = "https://" ]; then
+            selected_proxy="$proxy"
+            INFO "直接访问GitHub，不使用代理"
+            break
+        else
+            INFO "测试代理: ${proxy}"
+            if check_proxy_health "$proxy"; then
+                selected_proxy="$proxy"
+                proxy_available=true
+                INFO "代理可用: ${proxy}"
+                break
+            else
+                WARN "代理不可用: ${proxy}，尝试下一个"
+            fi
+        fi
+    done
+    
+    if [ -z "$selected_proxy" ]; then
+        gh_proxy="https://"
+        WARN "所有代理均不可用，使用直接访问GitHub（可能无法访问）"
+    else
+        gh_proxy="$selected_proxy"
+        if [ "$proxy_available" = true ]; then
+            INFO "已选择代理: ${gh_proxy}"
+        fi
+    fi
+}
+
+dd_xitong() {
+    check_root
+    
+    setup_gh_proxy
+    
+    dd_xitong_MollyLau() {
+        wget --no-check-certificate -qO InstallNET.sh "${gh_proxy}raw.githubusercontent.com/leitbogioro/Tools/master/Linux_reinstall/InstallNET.sh" && chmod a+x InstallNET.sh
+    }
+    
+    dd_xitong_bin456789() {
+        curl -O ${gh_proxy}raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh && chmod a+x reinstall.sh
+    }
+    
+    dd_xitong_1() {
+        echo -e "重装后初始用户名: ${Yellow}root${NC}  初始密码: ${Yellow}LeitboGi0ro${NC}  初始端口: ${Yellow}22${NC}"
+        echo -e "按任意键继续..."
+        read -n 1 -s -r -p ""
+        install_command wget
+        dd_xitong_MollyLau
+    }
+    
+    dd_xitong_2() {
+        echo -e "重装后初始用户名: ${Yellow}Administrator${NC}  初始密码: ${Yellow}Teddysun.com${NC}  初始端口: ${Yellow}3389${NC}"
+        echo -e "按任意键继续..."
+        read -n 1 -s -r -p ""
+        install_command wget
+        dd_xitong_MollyLau
+    }
+    
+    dd_xitong_3() {
+        echo -e "重装后初始用户名: ${Yellow}root${NC}  初始密码: ${Yellow}123@@@${NC}  初始端口: ${Yellow}22${NC}"
+        echo -e "按任意键继续..."
+        read -n 1 -s -r -p ""
+        dd_xitong_bin456789
+    }
+    
+    dd_xitong_4() {
+        echo -e "重装后初始用户名: ${Yellow}Administrator${NC}  初始密码: ${Yellow}123@@@${NC}  初始端口: ${Yellow}3389${NC}"
+        echo -e "按任意键继续..."
+        read -n 1 -s -r -p ""
+        dd_xitong_bin456789
+    }
+    
+    while true; do
+        clear
+        echo "重装系统"
+        echo "--------------------------------"
+        echo -e "${Red}注意: ${NC}重装有风险失联，不放心者慎用。重装预计花费15分钟，请提前备份数据。"
+        echo -e "${Yellow}感谢leitbogioro大佬和bin456789大佬的脚本支持！${NC}"
+        echo "------------------------"
+        echo "1. Debian 13                  2. Debian 12"
+        echo "3. Debian 11                  4. Debian 10"
+        echo "------------------------"
+        echo "11. Ubuntu 24.04              12. Ubuntu 22.04"
+        echo "13. Ubuntu 20.04              14. Ubuntu 18.04"
+        echo "------------------------"
+        echo "21. Rocky Linux 10            22. Rocky Linux 9"
+        echo "23. Alma Linux 10             24. Alma Linux 9"
+        echo "25. oracle Linux 10           26. oracle Linux 9"
+        echo "27. Fedora Linux 42           28. Fedora Linux 41"
+        echo "29. CentOS 10                 30. CentOS 9"
+        echo "------------------------"
+        echo "31. Alpine Linux              32. Arch Linux"
+        echo "33. Kali Linux                34. openEuler"
+        echo "35. openSUSE Tumbleweed       36. fnos飞牛公测版"
+        echo "------------------------"
+        echo "41. Windows 11                42. Windows 10"
+        echo "43. Windows 7                 44. Windows Server 2025"
+        echo "45. Windows Server 2022       46. Windows Server 2019"
+        echo "47. Windows 11 ARM"
+        echo "------------------------"
+        echo "0. 返回上一级选单"
+        echo "------------------------"
+        read -e -p "请选择要重装的系统: " sys_choice
+        case "$sys_choice" in
+            1)
+                dd_xitong_3
+                bash reinstall.sh debian 13
+                reboot
+                exit
+                ;;
+            2)
+                dd_xitong_1
+                bash InstallNET.sh -debian 12
+                reboot
+                exit
+                ;;
+            3)
+                dd_xitong_1
+                bash InstallNET.sh -debian 11
+                reboot
+                exit
+                ;;
+            4)
+                dd_xitong_1
+                bash InstallNET.sh -debian 10
+                reboot
+                exit
+                ;;
+            11)
+                dd_xitong_1
+                bash InstallNET.sh -ubuntu 24.04
+                reboot
+                exit
+                ;;
+            12)
+                dd_xitong_1
+                bash InstallNET.sh -ubuntu 22.04
+                reboot
+                exit
+                ;;
+            13)
+                dd_xitong_1
+                bash InstallNET.sh -ubuntu 20.04
+                reboot
+                exit
+                ;;
+            14)
+                dd_xitong_1
+                bash InstallNET.sh -ubuntu 18.04
+                reboot
+                exit
+                ;;
+            21)
+                dd_xitong_3
+                bash reinstall.sh rocky
+                reboot
+                exit
+                ;;
+            22)
+                dd_xitong_3
+                bash reinstall.sh rocky 9
+                reboot
+                exit
+                ;;
+            23)
+                dd_xitong_3
+                bash reinstall.sh almalinux
+                reboot
+                exit
+                ;;
+            24)
+                dd_xitong_3
+                bash reinstall.sh almalinux 9
+                reboot
+                exit
+                ;;
+            25)
+                dd_xitong_3
+                bash reinstall.sh oracle
+                reboot
+                exit
+                ;;
+            26)
+                dd_xitong_3
+                bash reinstall.sh oracle 9
+                reboot
+                exit
+                ;;
+            27)
+                dd_xitong_3
+                bash reinstall.sh fedora
+                reboot
+                exit
+                ;;
+            28)
+                dd_xitong_3
+                bash reinstall.sh fedora 41
+                reboot
+                exit
+                ;;
+            29)
+                dd_xitong_3
+                bash reinstall.sh centos 10
+                reboot
+                exit
+                ;;
+            30)
+                dd_xitong_3
+                bash reinstall.sh centos 9
+                reboot
+                exit
+                ;;
+            31)
+                dd_xitong_1
+                bash InstallNET.sh -alpine
+                reboot
+                exit
+                ;;
+            32)
+                dd_xitong_3
+                bash reinstall.sh arch
+                reboot
+                exit
+                ;;
+            33)
+                dd_xitong_3
+                bash reinstall.sh kali
+                reboot
+                exit
+                ;;
+            34)
+                dd_xitong_3
+                bash reinstall.sh openeuler
+                reboot
+                exit
+                ;;
+            35)
+                dd_xitong_3
+                bash reinstall.sh opensuse
+                reboot
+                exit
+                ;;
+            36)
+                dd_xitong_3
+                bash reinstall.sh fnos
+                reboot
+                exit
+                ;;
+            41)
+                dd_xitong_2
+                bash InstallNET.sh -windows 11 -lang "cn"
+                reboot
+                exit
+                ;;
+            42)
+                dd_xitong_2
+                bash InstallNET.sh -windows 10 -lang "cn"
+                reboot
+                exit
+                ;;
+            43)
+                dd_xitong_4
+                bash reinstall.sh windows --iso="https://drive.massgrave.dev/cn_windows_7_professional_with_sp1_x64_dvd_u_677031.iso" --image-name='Windows 7 PROFESSIONAL'
+                reboot
+                exit
+                ;;
+            44)
+                dd_xitong_2
+                bash InstallNET.sh -windows 2025 -lang "cn"
+                reboot
+                exit
+                ;;
+            45)
+                dd_xitong_2
+                bash InstallNET.sh -windows 2022 -lang "cn"
+                reboot
+                exit
+                ;;
+            46)
+                dd_xitong_2
+                bash InstallNET.sh -windows 2019 -lang "cn"
+                reboot
+                exit
+                ;;
+            47)
+                dd_xitong_4
+                bash reinstall.sh dd --img https://r2.hotdog.eu.org/win11-arm-with-pagefile-15g.xz
+                reboot
+                exit
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+}
+
 export -f INFO ERROR WARN \
     check_path check_port check_space check_root check_env check_loop_support check_qnap \
     setup_status command_exists \
     docker_pull update_ailg restore_containers restore_containers_simple \
     xy_media_reunzip \
     emby_close_6908_port get_docker0_ip wait_emby_start wait_gbox_start \
-    cleanup_invalid_loops get_loop_from_state_file update_loop_state_file check_loop_binding smart_bind_loop_device
+    cleanup_invalid_loops get_loop_from_state_file update_loop_state_file check_loop_binding smart_bind_loop_device \
+    check_proxy_health setup_gh_proxy dd_xitong

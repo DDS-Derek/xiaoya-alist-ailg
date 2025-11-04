@@ -1941,11 +1941,13 @@ user_selecto() {
         echo -e "\033[1;32m10、安装/配置小雅Emby爬虫同步（G-Box专用版）\033[0m\033[0m"
         echo -e "\033[1;32m11、一键安装小雅Emby音乐资源\033[0m\033[0m"
         echo -e "\033[1;32m12、img镜像自定义重装小雅EMBY元数据\033[0m\033[0m"
+        echo -e "\n"
         echo -e "\033[1;32m13、使用旧版单loop设备方式重建Emby\033[0m\033[0m"
         echo -e "\033[1;32m14、屏蔽Emby 6908端口（防止自动跳转）\033[0m\033[0m"
+        echo -e "\033[1;32m15、一键重装系统\033[0m\033[0m"
         echo -e "\n"
         echo -e "——————————————————————————————————————————————————————————————————————————————————"
-        read -erp "请输入您的选择（1-14，按b返回上级菜单或按q退出）：" fo_select
+        read -erp "请输入您的选择（1-15，按b返回上级菜单或按q退出）：" fo_select
         case "$fo_select" in
         1) ailg_uninstall; break ;;
         2) happy_emby; break ;;
@@ -1961,6 +1963,7 @@ user_selecto() {
         12) xy_media_reunzip; break ;;
         13) legacy_emby_rebuild; break ;;
         14) emby_close_6908_port; break ;;
+        15) dd_xitong; break ;;
         [Bb]) clear; break ;;
         [Qq]) exit 0 ;;
         *)
