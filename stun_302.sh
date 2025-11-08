@@ -20,20 +20,21 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 # 参数处理
-API_TOKEN=$1
-DOMAIN=$2
+NEW_IP=$1
+NEW_PORT=$2
 RULE_NAME_VAR=$3  # 用于URL路径匹配的变量名
-RULE_NAME=${4:-ailg}  # 如果未提供，默认使用 ailg（用于DNS记录名和规则描述名）
-NEW_IP=$5
-NEW_PORT=$6
+API_TOKEN=$4
+DOMAIN=$5
+RULE_NAME=${6:-ailg}  # 如果未提供，默认使用 ailg（用于DNS记录名和规则描述名）
 TARGET_URL="http://${NEW_IP}:${NEW_PORT}"
 
 # 检查必需参数
-if [ -z "$API_TOKEN" ] || [ -z "$DOMAIN" ] || [ -z "$RULE_NAME_VAR" ] || [ -z "$NEW_IP" ] || [ -z "$NEW_PORT" ]; then
+if [ -z "$NEW_IP" ] || [ -z "$NEW_PORT" ] || [ -z "$RULE_NAME_VAR" ] || [ -z "$API_TOKEN" ] || [ -z "$DOMAIN" ]; then
     echo "错误: 缺少必需参数"
-    echo "用法: $0 <API_TOKEN> <DOMAIN> <RULE_NAME_VAR> [RULE_NAME] <NEW_IP> <NEW_PORT>"
-    echo "示例: $0 your_token example.com ailg ailg 1.2.3.4 5678"
-    echo "      $0 your_token example.com custom custom 1.2.3.4 5678"
+    echo "用法: $0 <NEW_IP> <NEW_PORT> <RULE_NAME_VAR> <API_TOKEN> <DOMAIN> [RULE_NAME]"
+    echo "示例: $0 1.2.3.4 5678 ailg your_token example.com ailg"
+    echo "      $0 1.2.3.4 5678 custom your_token example.com custom"
+    echo "      $0 1.2.3.4 5678 custom your_token example.com  # RULE_NAME 默认为 ailg"
     echo "说明: RULE_NAME_VAR 用于URL路径匹配，RULE_NAME 用于DNS记录名和规则描述名（可选，默认ailg）"
     exit 1
 fi
