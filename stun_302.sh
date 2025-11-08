@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # --- 从Lucky接收参数 ---
 # 为了方便调试，您可以先手动设置这些变量
@@ -46,7 +46,7 @@ RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}
 # --- 4. 检查并输出结果 ---
 SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
 
-if [ "$SUCCESS" == "true" ]; then
+if [ "$SUCCESS" = "true" ]; then
   echo "Cloudflare重定向规则已通过 API 令牌 成功更新！新目标: ${TARGET_URL}"
 else
   echo "更新失败！Cloudflare API 返回错误:"
