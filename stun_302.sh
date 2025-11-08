@@ -1,6 +1,9 @@
 #!/bin/sh
 
-apk add --no-cache -q jq >/dev/null 2>&1
+# 检查并安装 jq（如果不存在）
+if ! command -v jq >/dev/null 2>&1; then
+    apk add --no-cache -q jq >/dev/null 2>&1
+fi
 
 NEW_IP=$1
 NEW_PORT=$2
