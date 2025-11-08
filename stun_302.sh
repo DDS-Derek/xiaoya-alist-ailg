@@ -2,7 +2,21 @@
 
 # 检查并安装 jq（如果不存在）
 if ! command -v jq >/dev/null 2>&1; then
+    # 备份源配置文件
+    cp /etc/apk/repositories /etc/apk/repositories.bak
+    
+    # 替换为清华镜像源
+    sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
+    
+    # 执行 jq 安装
     apk add --no-cache -q jq >/dev/null 2>&1
+    
+    # 检查是否安装成功，失败则恢复源并中止执行
+    if ! command -v jq >/dev/null 2>&1; then
+        cp /etc/apk/repositories.bak /etc/apk/repositories
+        echo "错误: jq 安装失败，已恢复源配置，脚本中止执行"
+        exit 1
+    fi
 fi
 
 NEW_IP=$1
