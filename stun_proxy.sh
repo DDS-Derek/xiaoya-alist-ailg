@@ -186,20 +186,39 @@ async function handleRequest(request) {
   }
   
   // 构建目标 URL：与重定向模式逻辑一致
-  // https://${subdomain}.${targetDomain}:${targetPort}${剩余路径}
+  // 使用 HTTPS（目标服务启用了 TLS）
   const targetUrl = `https://${subdomain}.${targetDomain}:${targetPort}${fullPath}${url.search}`;
   
   // 创建新的请求，转发原始请求的所有信息
+  // 注意：需要修改 Host 头，因为目标服务器可能根据 Host 头路由请求
+  const headers = new Headers(request.headers);
+  // 设置正确的 Host 头，让目标服务器能正确识别请求
+  headers.set('Host', `${subdomain}.${targetDomain}:${targetPort}`);
+  // 移除可能引起问题的 Cloudflare 特定头部
+  headers.delete('CF-Connecting-IP');
+  headers.delete('CF-Ray');
+  headers.delete('CF-Visitor');
+  headers.delete('CF-IPCountry');
+  // 移除可能引起问题的其他头部
+  headers.delete('X-Forwarded-Proto');
+  headers.delete('X-Forwarded-For');
+  
   const proxyRequest = new Request(targetUrl, {
     method: request.method,
-    headers: request.headers,
+    headers: headers,
     body: request.body,
     redirect: 'follow'
   });
   
   try {
     // 发起代理请求
-    const response = await fetch(proxyRequest);
+    // 注意：Cloudflare Workers 的 fetch 会验证 SSL 证书
+    // 如果目标服务器使用自签名证书，可能会失败
+    // 但根据你的测试，直接访问是正常的，所以证书应该是有效的
+    const response = await fetch(proxyRequest, {
+      // Workers 的 fetch 默认超时是 30 秒
+      // 如果目标服务器响应慢，可能需要优化
+    });
     
     // 创建响应，复制状态码和头部
     const proxyResponse = new Response(response.body, {
@@ -210,8 +229,13 @@ async function handleRequest(request) {
     
     return proxyResponse;
   } catch (e) {
+    // 详细的错误信息，帮助调试
     console.error('Proxy error:', e.message);
-    return new Response(`Proxy error: ${e.message}`, { status: 502 });
+    console.error('Target URL:', targetUrl);
+    return new Response(`Proxy error: ${e.message}\nTarget URL: ${targetUrl}`, { 
+      status: 502,
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
 }
 EOF
