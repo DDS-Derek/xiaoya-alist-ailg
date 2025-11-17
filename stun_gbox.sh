@@ -97,9 +97,6 @@ if ! echo "$OPEN_API_URL" | grep -qE '^https?://[^:]+:3002/'; then
     exit 1
 fi
 
-echo "处理后的域名: ${DOMAIN}"
-echo "Open API URL: ${OPEN_API_URL}"
-
 # 从 Open API URL 中提取主机名（IP 或域名）
 # 提取 http://hostname:3002 或 https://hostname:3002 中的 hostname 部分
 HOSTNAME=$(echo "$OPEN_API_URL" | sed -E 's|^https?://([^:/]+).*|\1|')
@@ -109,21 +106,15 @@ if [ -z "$HOSTNAME" ]; then
     exit 1
 fi
 
-echo "提取的主机名: ${HOSTNAME}"
-
 # 执行 ping 检查
-echo "正在检查主机 ${HOSTNAME} 的连通性..."
 if ! ping -c 1 -W 2 "$HOSTNAME" >/dev/null 2>&1; then
     echo "错误: 无法 ping 通主机 ${HOSTNAME}，请检查网络连接"
     exit 1
 fi
-echo "主机 ${HOSTNAME} ping 检查通过"
 
 # 构建新的 API 端点：将端口 3002 替换为 4567，并替换路径为 /api/sunpanel/update-items
 # 提取协议和主机部分，替换端口，然后添加新路径
 NEW_API_URL=$(echo "$OPEN_API_URL" | sed -E 's|^(https?://[^:]+):3002(/.*)?$|\1:4567/api/sunpanel/update-items|')
-
-echo "新的 API 端点: ${NEW_API_URL}"
 
 # 构建 domainPort（域名:端口）
 DOMAIN_PORT="${DOMAIN}:${PORT}"
@@ -139,11 +130,7 @@ JSON_BODY=$(jq -n -c \
         "domainPort": $domainPort
     }')
 
-echo "请求体:"
-echo "$JSON_BODY" | jq '.'
-
 # 执行 curl 请求
-echo "正在发送请求到 ${NEW_API_URL}..."
 RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$NEW_API_URL" \
     -H "Content-Type: application/json" \
     -d "$JSON_BODY")
@@ -151,8 +138,6 @@ RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$NEW_API_URL" \
 # 分离响应体和 HTTP 状态码
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
-
-echo "HTTP 状态码: ${HTTP_CODE}"
 
 # 检查响应
 if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
