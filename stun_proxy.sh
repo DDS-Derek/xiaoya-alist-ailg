@@ -127,17 +127,73 @@ else
     echo "KV Namespace 已存在: ${KV_NAMESPACE_ID}"
 fi
 
-# 更新 KV 存储的值（存储域名和端口，与重定向模式一致）
+# 更新 KV 存储的值（存储 IP、域名和端口）
 echo "更新 KV 存储值..."
-curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${KV_NAMESPACE_ID}/values/domain" \
-  -H "Authorization: Bearer ${API_TOKEN}" \
-  --data "$DOMAIN" > /dev/null
 
-curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${KV_NAMESPACE_ID}/values/port" \
+# 写入 IP
+IP_RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${KV_NAMESPACE_ID}/values/ip" \
   -H "Authorization: Bearer ${API_TOKEN}" \
-  --data "$NEW_PORT" > /dev/null
+  --data "$NEW_IP")
+if echo "$IP_RESPONSE" | jq -e '.success == true' > /dev/null 2>&1; then
+    echo "  ✓ IP 写入成功: ${NEW_IP}"
+else
+    echo "  ❌ IP 写入失败！"
+    echo "  响应: $IP_RESPONSE"
+    echo "  请检查 API Token 权限（需要 Account:Workers KV Storage:Edit）"
+    exit 1
+fi
 
-echo "KV 存储更新成功: Domain=${DOMAIN}, Port=${NEW_PORT}"
+# 写入 Domain
+DOMAIN_RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${KV_NAMESPACE_ID}/values/domain" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  --data "$DOMAIN")
+if echo "$DOMAIN_RESPONSE" | jq -e '.success == true' > /dev/null 2>&1; then
+    echo "  ✓ Domain 写入成功: ${DOMAIN}"
+else
+    echo "  ⚠ Domain 写入可能失败，继续执行..."
+fi
+
+# 写入 Port
+PORT_RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${KV_NAMESPACE_ID}/values/port" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  --data "$NEW_PORT")
+if echo "$PORT_RESPONSE" | jq -e '.success == true' > /dev/null 2>&1; then
+    echo "  ✓ Port 写入成功: ${NEW_PORT}"
+else
+    echo "  ⚠ Port 写入可能失败，继续执行..."
+fi
+
+# 验证 KV 值（确保值正确写入）
+echo "验证 KV 存储值..."
+VERIFY_IP=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${KV_NAMESPACE_ID}/values/ip" \
+  -H "Authorization: Bearer ${API_TOKEN}")
+VERIFY_DOMAIN=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${KV_NAMESPACE_ID}/values/domain" \
+  -H "Authorization: Bearer ${API_TOKEN}")
+VERIFY_PORT=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${KV_NAMESPACE_ID}/values/port" \
+  -H "Authorization: Bearer ${API_TOKEN}")
+
+echo "KV 存储验证结果:"
+if [ -n "$VERIFY_IP" ] && [ "$VERIFY_IP" != "null" ]; then
+    echo "  ✓ IP: ${VERIFY_IP}"
+    if [ "$VERIFY_IP" != "$NEW_IP" ]; then
+        echo "    ⚠ 警告: IP 值不匹配！期望: ${NEW_IP}, 实际: ${VERIFY_IP}"
+    fi
+else
+    echo "  ❌ IP: 未找到或为空"
+fi
+
+if [ -n "$VERIFY_DOMAIN" ] && [ "$VERIFY_DOMAIN" != "null" ]; then
+    echo "  ✓ Domain: ${VERIFY_DOMAIN}"
+else
+    echo "  ❌ Domain: 未找到或为空"
+fi
+
+if [ -n "$VERIFY_PORT" ] && [ "$VERIFY_PORT" != "null" ]; then
+    echo "  ✓ Port: ${VERIFY_PORT}"
+else
+    echo "  ❌ Port: 未找到或为空"
+fi
+echo ""
 
 # ============================================
 # 2. 创建/更新 Worker
@@ -149,7 +205,16 @@ echo "步骤 2: 创建/更新 Worker..."
 # 使用 Service Worker 格式（API 上传时使用 body_part: "script"）
 WORKER_CODE=$(cat <<'EOF'
 addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request));
+  // 确保所有异常都被捕获并返回响应
+  event.respondWith(
+    handleRequest(event.request).catch(error => {
+      console.error('Unhandled error in handleRequest:', error);
+      return new Response('Internal Server Error: ' + error.message, {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain' }
+      });
+    })
+  );
 });
 
 async function handleRequest(request) {
@@ -169,28 +234,64 @@ async function handleRequest(request) {
   
   // 检查全局变量 CONFIG 是否存在
   if (typeof CONFIG === 'undefined') {
-    return new Response("KV namespace not bound to this worker", { status: 500 });
+    console.error('CONFIG is undefined - KV namespace not bound to this worker');
+    return new Response("KV namespace not bound to this worker. Please check Worker bindings in Cloudflare Dashboard.", { 
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
   
-  let targetDomain, targetPort;
+  // 调试：检查 CONFIG 对象
+  console.log('CONFIG type:', typeof CONFIG);
+  console.log('CONFIG methods:', Object.keys(CONFIG || {}));
+  
+  let targetIP, targetDomain, targetPort;
   try {
+    // 尝试读取 KV 值（注意：key 名称区分大小写）
+    // 先尝试小写的 'ip'
+    targetIP = await CONFIG.get('ip');
+    // 如果小写 'ip' 不存在，尝试大写 'IP'（兼容性）
+    if (!targetIP) {
+      console.log('Trying uppercase IP key...');
+      targetIP = await CONFIG.get('IP');
+    }
+    
     targetDomain = await CONFIG.get('domain');
     targetPort = await CONFIG.get('port');
     
-    if (!targetDomain || !targetPort) {
-      return new Response("Configuration (domain/port) not found in KV storage.", { status: 500 });
+    // 调试信息（可以在 Cloudflare Dashboard 的 Worker 日志中查看）
+    console.log('KV read results:', { 
+      ip: targetIP ? `found: ${targetIP.substring(0, 10)}...` : 'missing', 
+      domain: targetDomain ? `found: ${targetDomain}` : 'missing', 
+      port: targetPort ? `found: ${targetPort}` : 'missing' 
+    });
+    
+    if (!targetIP || !targetDomain || !targetPort) {
+      const missing = [];
+      if (!targetIP) missing.push('ip');
+      if (!targetDomain) missing.push('domain');
+      if (!targetPort) missing.push('port');
+      console.error('Missing KV values:', missing);
+      return new Response(`Configuration missing in KV storage: ${missing.join(', ')}\n\nPlease run the setup script to update KV storage.\n\nCurrent values:\n- ip: ${targetIP || 'NOT FOUND'}\n- domain: ${targetDomain || 'NOT FOUND'}\n- port: ${targetPort || 'NOT FOUND'}`, { 
+        status: 500,
+        headers: { 'Content-Type': 'text/plain' }
+      });
     }
   } catch (e) {
-    console.error('Error reading KV:', e.message);
-    return new Response("Failed to read configuration from KV storage.", { status: 500 });
+    console.error('Error reading KV:', e.message, e.stack);
+    return new Response(`Failed to read configuration from KV storage.\n\nError: ${e.message}\n\nPlease check:\n1. KV namespace is bound to this Worker\n2. KV values are set correctly\n3. Worker has proper permissions`, { 
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
   
-  // 构建目标 URL：与重定向模式逻辑一致
+  // 构建目标 URL：使用域名而不是 IP（Cloudflare 不允许 Worker 直接访问 IP）
   // 使用 HTTPS（目标服务启用了 TLS）
+  // 注意：使用域名访问，需要确保泛域名记录指向正确的 IP（关闭代理）
   const targetUrl = `https://${subdomain}.${targetDomain}:${targetPort}${fullPath}${url.search}`;
   
   // 创建新的请求，转发原始请求的所有信息
-  // 注意：需要修改 Host 头，因为目标服务器可能根据 Host 头路由请求
+  // 注意：必须设置正确的 Host 头，因为目标服务器（lucky）根据 Host 头路由请求
   const headers = new Headers(request.headers);
   // 设置正确的 Host 头，让目标服务器能正确识别请求
   headers.set('Host', `${subdomain}.${targetDomain}:${targetPort}`);
@@ -215,12 +316,29 @@ async function handleRequest(request) {
     // 注意：Cloudflare Workers 的 fetch 会验证 SSL 证书
     // 如果目标服务器使用自签名证书，可能会失败
     // 但根据你的测试，直接访问是正常的，所以证书应该是有效的
-    const response = await fetch(proxyRequest, {
-      // Workers 的 fetch 默认超时是 30 秒
-      // 如果目标服务器响应慢，可能需要优化
+    console.log('Attempting to fetch:', targetUrl);
+    console.log('Request method:', request.method);
+    
+    // 添加超时控制（Workers 默认 30 秒，但我们可以提前处理）
+    const fetchPromise = fetch(proxyRequest);
+    
+    // 创建一个超时 Promise（25 秒）
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Request timeout after 25 seconds')), 25000);
     });
     
+    // 使用 Promise.race 实现超时
+    const response = await Promise.race([fetchPromise, timeoutPromise]);
+    
+    console.log('Response status:', response.status);
+    
+    // 检查响应是否有效
+    if (!response || !response.ok) {
+      console.warn('Response not OK:', response.status, response.statusText);
+    }
+    
     // 创建响应，复制状态码和头部
+    // 注意：response.body 是一个 ReadableStream，需要正确传递
     const proxyResponse = new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
@@ -231,8 +349,23 @@ async function handleRequest(request) {
   } catch (e) {
     // 详细的错误信息，帮助调试
     console.error('Proxy error:', e.message);
+    console.error('Error name:', e.name);
+    console.error('Error stack:', e.stack);
     console.error('Target URL:', targetUrl);
-    return new Response(`Proxy error: ${e.message}\nTarget URL: ${targetUrl}`, { 
+    console.error('Target domain:', `${subdomain}.${targetDomain}`);
+    console.error('Target port:', targetPort);
+    
+    // 提供更详细的错误信息
+    let errorMessage = `Proxy error: ${e.message}`;
+    if (e.name === 'TypeError' && e.message.includes('fetch')) {
+      errorMessage += '\n\n可能的原因：\n';
+      errorMessage += '1. 目标服务器无法访问（检查防火墙、服务是否运行）\n';
+      errorMessage += '2. DNS 解析失败（检查泛域名记录 *.ailg.dpdns.org 是否正确配置）\n';
+      errorMessage += '3. SSL 证书验证失败（检查证书是否有效）\n';
+      errorMessage += '4. 端口被阻止（检查防火墙是否允许 Cloudflare IP 访问）';
+    }
+    
+    return new Response(`${errorMessage}\n\nTarget URL: ${targetUrl}`, { 
       status: 502,
       headers: { 'Content-Type': 'text/plain' }
     });
@@ -251,6 +384,21 @@ EXISTING_WORKER=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/
 # 创建临时文件存储 Worker 代码
 WORKER_CODE_FILE=$(mktemp)
 echo "$WORKER_CODE" > "$WORKER_CODE_FILE"
+
+# 验证代码文件是否正确写入（调试用）
+if [ ! -s "$WORKER_CODE_FILE" ]; then
+    echo "错误: Worker 代码文件为空"
+    exit 1
+fi
+
+# 检查代码文件的行数（用于调试）
+CODE_LINES=$(wc -l < "$WORKER_CODE_FILE")
+echo "Worker 代码行数: ${CODE_LINES}"
+
+# 检查代码中是否有明显的语法错误（检查是否有未闭合的括号等）
+if ! grep -q "^}" "$WORKER_CODE_FILE"; then
+    echo "警告: Worker 代码可能不完整（未找到结束的 }）"
+fi
 
 # 创建 metadata JSON（包含 KV 绑定）
 # 使用 Service Worker 格式，需要指定 body_part: "script"
@@ -280,10 +428,11 @@ fi
 # 使用 multipart/form-data 上传 Worker 代码和 metadata
 # Service Worker 格式：metadata 中指定 body_part: "script"，上传时使用 script 字段名
 # 注意：PUT 到 /workers/scripts/ 可以创建或更新 Worker
+# 使用 --data-binary 确保文件内容完整上传，不会被 shell 解释
 WORKER_RESPONSE=$(curl -s -X PUT "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
   -H "Authorization: Bearer ${API_TOKEN}" \
   -F "metadata=${METADATA_JSON};type=application/json" \
-  -F "script=@${WORKER_CODE_FILE};type=application/javascript")
+  -F "script=@${WORKER_CODE_FILE};type=application/javascript;filename=worker.js")
 
 # 清理临时文件
 rm -f "$WORKER_CODE_FILE" "$METADATA_FILE"
@@ -291,10 +440,47 @@ rm -f "$WORKER_CODE_FILE" "$METADATA_FILE"
 # 检查 Worker 创建/更新是否成功
 WORKER_SUCCESS=$(echo "$WORKER_RESPONSE" | jq -r '.success // false')
 if [ "$WORKER_SUCCESS" != "true" ] && [ -n "$(echo "$WORKER_RESPONSE" | jq -r '.errors // empty')" ]; then
-    echo "警告: Worker 创建/更新可能有问题"
+    echo "❌ Worker 创建/更新失败！"
     echo "$WORKER_RESPONSE" | jq '.'
+    exit 1
 else
-    echo "Worker 创建/更新成功: ${WORKER_NAME}"
+    echo "✓ Worker 创建/更新成功: ${WORKER_NAME}"
+    
+    # 验证上传的代码是否完整（通过 API 获取 Worker 代码并检查）
+    echo "验证上传的 Worker 代码..."
+    UPLOADED_CODE=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/scripts/${WORKER_NAME}" \
+      -H "Authorization: Bearer ${API_TOKEN}" \
+      -H "Content-Type: application/json" 2>/dev/null)
+    
+    if echo "$UPLOADED_CODE" | grep -q "addEventListener"; then
+        UPLOADED_LINES=$(echo "$UPLOADED_CODE" | wc -l)
+        echo "  ✓ 上传的代码包含 addEventListener（代码行数: ${UPLOADED_LINES}）"
+    else
+        echo "  ⚠ 警告: 上传的代码可能不完整或有问题"
+        echo "  代码前 200 字符: $(echo "$UPLOADED_CODE" | head -c 200)"
+    fi
+    
+    # 验证 Worker 的 KV 绑定
+    echo "验证 Worker 的 KV 绑定..."
+    WORKER_DETAILS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/workers/services/${WORKER_NAME}" \
+      -H "Authorization: Bearer ${API_TOKEN}" \
+      -H "Content-Type: application/json")
+    
+    WORKER_BINDINGS=$(echo "$WORKER_DETAILS" | jq -r '.result.bindings[]? | select(.type == "kv_namespace") | .name // empty')
+    if echo "$WORKER_BINDINGS" | grep -q "CONFIG"; then
+        echo "  ✓ Worker 已正确绑定 KV namespace: CONFIG"
+        BOUND_NAMESPACE_ID=$(echo "$WORKER_DETAILS" | jq -r '.result.bindings[]? | select(.type == "kv_namespace" and .name == "CONFIG") | .namespace_id // empty')
+        if [ "$BOUND_NAMESPACE_ID" = "$KV_NAMESPACE_ID" ]; then
+            echo "  ✓ 绑定的 KV namespace ID 正确: ${KV_NAMESPACE_ID}"
+        else
+            echo "  ⚠ 警告: 绑定的 KV namespace ID 不匹配!"
+            echo "    期望: ${KV_NAMESPACE_ID}"
+            echo "    实际: ${BOUND_NAMESPACE_ID}"
+        fi
+    else
+        echo "  ⚠ 警告: Worker 未找到 CONFIG 绑定!"
+        echo "  当前绑定: $WORKER_BINDINGS"
+    fi
 fi
 
 # ============================================
