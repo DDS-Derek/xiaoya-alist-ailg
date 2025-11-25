@@ -1,23 +1,41 @@
 #!/bin/bash
 # ---------------------------------------------------------
 # 工业级智能硬盘休眠守护进程 (Multi-Drive Adaptive Spindown)
-# v3.2 - 最终修正版
+# v3.3 - 参数传递版
+# ---------------------------------------------------------
+# 
+# 用法:
+#   方式1 (本地执行):
+#     ./hd_sleep.sh "/dev/disk/by-id/ata-XXX" "/dev/disk/by-id/ata-YYY"
+#
+#   方式2 (远程执行):
+#     hd_1="/dev/disk/by-id/ata-XXX"
+#     hd_2="/dev/disk/by-id/ata-YYY"
+#     curl -sSLf https://ailg.ggbond.org/hd_sleep.sh | bash -s "${hd_1}" "${hd_2}"
+#
 # ---------------------------------------------------------
 
-# ================= 前置依赖检查 =================
-for cmd in hdparm smartctl awk; do
-    if ! command -v $cmd &> /dev/null; then
-        echo "❌ [Error] Required command '$cmd' not found. Please install it first."
-        exit 1
-    fi
-done
+# ================= 参数接收 =================
+if [ $# -eq 0 ]; then
+    echo "❌ [Error] No drive specified!"
+    echo ""
+    echo "Usage:"
+    echo "  $0 <drive_id_1> [drive_id_2] [drive_id_3] ..."
+    echo ""
+    echo "Example:"
+    echo "  $0 /dev/disk/by-id/ata-WDC_WD20SPZX-22UA7T0_WD-WX62E21FN938"
+    echo ""
+    echo "Remote execution:"
+    echo '  curl -sSLf https://ailg.ggbond.org/hd_sleep.sh | bash -s "/dev/disk/by-id/xxx"'
+    exit 1
+fi
 
-# ================= 配置区域 (请在此处修改) =================
+# 从命令行参数构建硬盘列表
+TARGET_DRIVES=("$@")
 
-# 将你要管理的硬盘 ID 放入下面的数组中 (注意使用双引号和空格分隔)
-TARGET_DRIVES=(
-    "/dev/disk/by-id/ata-WDC_WD20SPZX-22UA7T0_WD-WX62E21FN938"
-)
+echo "Received ${#TARGET_DRIVES[@]} drive(s) from command line arguments."
+
+# ================= 配置区域 =================
 
 # 基础检查间隔 (秒)
 # 建议 60 秒，太短会浪费 CPU，太长会导致休眠延迟
@@ -27,6 +45,14 @@ POLL_INTERVAL=60
 MAX_SPINUPS=3
 
 # ==========================================================
+
+# ================= 前置依赖检查 =================
+for cmd in hdparm smartctl awk; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "❌ [Error] Required command '$cmd' not found. Please install it first."
+        exit 1
+    fi
+done
 
 # ================= 配置参数验证 =================
 if ! [[ "$POLL_INTERVAL" =~ ^[0-9]+$ ]] || [ "$POLL_INTERVAL" -lt 10 ]; then
@@ -71,7 +97,7 @@ init_drive() {
     # 初始化该硬盘的状态
     drive_status["$disk_id"]="active"
     drive_spinups["$disk_id"]=0
-    drive_timeout["$disk_id"]=1800 # 初始 30分钟
+    drive_timeout["$disk_id"]=120 # 初始 30分钟
     drive_idle_sec["$disk_id"]=0
     drive_short_name["$disk_id"]="$short_name"
     
@@ -101,9 +127,9 @@ update_strategy() {
     local count=${drive_spinups["$id"]}
     
     case $count in
-        0) drive_timeout["$id"]=1800 ;; # 30m
-        1) drive_timeout["$id"]=3600 ;; # 60m
-        2) drive_timeout["$id"]=5400 ;; # 90m
+        0) drive_timeout["$id"]=120 ;; # 30m
+        1) drive_timeout["$id"]=240 ;; # 60m
+        2) drive_timeout["$id"]=360 ;; # 90m
         *) drive_timeout["$id"]="unlimited" ;;
     esac
 }
@@ -153,7 +179,8 @@ trap cleanup SIGTERM SIGINT
 
 # --- 主程序开始 ---
 
-echo "=== Spindown Daemon v3.2 Started ==="
+echo "=== Spindown Daemon v3.3 Started ==="
+echo ""
 
 # 1. 遍历并初始化有效硬盘
 for disk in "${TARGET_DRIVES[@]}"; do
