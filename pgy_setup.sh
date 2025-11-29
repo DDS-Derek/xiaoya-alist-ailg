@@ -215,14 +215,25 @@ inject_rules_into_pgystart() {
     fi
 
     docker exec "$CONTAINER_NAME" sh -lc "\
-awk -v blk=\"$inject_block\" '\
+awk -v blk=\"$inject_block\" -v cidr=\"${TARGET_CIDR}\" -v peer_vip=\"${PEER_VIP}\" '\
     BEGIN { found = 0 }\
     /while[[:space:]]+true/ {\
         if (found == 0) {\
             print blk;\
-            found = 1\
+            print \"while true\";\
+            print \"do\";\
+            print \"  if ! ip route show | grep -qF \\\"\" cidr \" via \" peer_vip \"\\\" ; then\";\
+            print \"    ip route replace \" cidr \" via \" peer_vip;\
+            print \"  fi\";\
+            print \"  sleep 60\";\
+            print \"done\";\
+            found = 1;\
+            next\
         }\
     }\
+    /^do$/ && found { next }\
+    /^[[:space:]]*sleep/ && found { next }\
+    /^done$/ && found { found = 0; next }\
     { print }\
 ' /usr/share/pgyvpn/script/pgystart \
 > /tmp/pgystart && \
