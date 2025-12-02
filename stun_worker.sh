@@ -3,7 +3,7 @@
 logo() {
     cat << 'LOGO' | echo -e "$(cat -)"
 
-\033[1;32m—————————————————————————————————— \033[1;31mA I \033[1;33m老 \033[1;36mG \033[1;32m———————————————————————————————————————\033[0m
+—————————————————————————————————— A I 老 G ———————————————————————————————————————
 
        $$$$$$\          $$$$$$$\   $$$$$$\  $$\   $$\ 
       $$  __$$\         $$  __$$\ $$  __$$\ $$ |  $$ |
@@ -14,10 +14,10 @@ logo() {
       \$$$$$$  |        $$$$$$$  | $$$$$$  |$$ /  $$ |
        \______/         \_______/  \______/ \__|  \__|
 
-\033[1;32m———————————————————————————————————————————————————————————————————————————————————\033[0m
-# Copyright (c) 2025 AI老G <\033[1;36mhttps://space.bilibili.com/252166818\033[0m>
-# 有问题可入群交流：\033[1;36mTG电报：https://t.me/ailg666\033[0m；\033[1;36m加微入群：ailg_666\033[0m；
-# 如果您喜欢这个脚本，可以请我喝咖啡：\033[1;36mhttps://ailg.ggbond.org/3q.jpg\033[0m
+———————————————————————————————————————————————————————————————————————————————————
+# Copyright (c) 2025 AI老G <https://space.bilibili.com/252166818>
+# 有问题可入群交流：TG电报：https://t.me/ailg666；加微入群：ailg_666；
+# 如果您喜欢这个脚本，可以请我喝咖啡：https://ailg.ggbond.org/3q.jpg
 LOGO
 }
 
@@ -181,34 +181,39 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
   // 在 Service Worker 格式中，绑定(bindings)是全局变量，而不是通过 env 传入
   // 因此，直接使用 CONFIG，而不是 env.CONFIG
-  const url = new URL(request.url);
-  const pathSegments = url.pathname.split('/').filter(Boolean);
-  
-  if (pathSegments.length > 0) {
-    const subdomain = pathSegments[0];
-    
-    // 检查全局变量 CONFIG 是否存在
-    if (typeof CONFIG === 'undefined') {
-      return new Response("KV namespace not bound to this worker", { status: 500 });
-    }
-    
-    let targetDomain, targetPort;
-    try {
-      targetDomain = await CONFIG.get('domain');
-      targetPort = await CONFIG.get('port');
-      
-      if (!targetDomain || !targetPort) {
-        return new Response("Configuration (domain/port) not found in KV storage.", { status: 500 });
+    const url = new URL(request.url);
+    const pathSegments = url.pathname.split('/').filter(Boolean);
+
+    if (pathSegments.length > 0) {
+      const subdomain = pathSegments[0];
+
+      // 检查全局变量 CONFIG 是否存在
+      if (typeof CONFIG === 'undefined') {
+        return new Response("KV namespace not bound to this worker", { status: 500 });
       }
-    } catch (e) {
-      console.error('Error reading KV:', e.message);
-      return new Response("Failed to read configuration from KV storage.", { status: 500 });
+
+      let targetDomain, targetPort;
+      try {
+        targetDomain = await CONFIG.get('domain');
+        targetPort = await CONFIG.get('port');
+
+        if (!targetDomain || !targetPort) {
+          return new Response("Configuration (domain/port) not found in KV storage.", { status: 500 });
+        }
+      } catch (e) {
+        console.error('Error reading KV:', e.message);
+        return new Response("Failed to read configuration from KV storage.", { status: 500 });
+      }
+
+      // 将剩余路径和查询字符串保留并拼接到目标 URL 上
+      const rest = pathSegments.slice(1).join('/');
+      const restPath = rest ? '/' + rest : '';
+      const search = url.search || '';
+      const targetUrl = `https://${subdomain}.${targetDomain}:${targetPort}${restPath}${search}`;
+
+      // 使用 302 临时重定向
+      return Response.redirect(targetUrl, 302);
     }
-    
-    const targetUrl = `https://${subdomain}.${targetDomain}:${targetPort}`;
-    // 使用 302 临时重定向
-    return Response.redirect(targetUrl, 302);
-  }
   
   return new Response("Please specify a path, for example /alist", { status: 404 });
 }
