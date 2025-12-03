@@ -166,6 +166,3 @@ if [ "$WILDCARD_SUCCESS" != "true" ]; then
 fi
 
 echo "done: https://${DNS_SUBDOMAIN}/* -> ${WORKER_NAME}"
-        return new Response("KV namespace not bound to this worker", { status: 500 });
-
-      }
